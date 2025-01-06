@@ -60,6 +60,7 @@ const commands = [
     .setName('kickleaderboard')
     .setDescription('Display the kick leaderboard')
     .toJSON(),
+
     new SlashCommandBuilder()
     .setName('clickleaderboard')
     .setDescription('Display the button click leaderboard')
@@ -70,14 +71,12 @@ const commands = [
     .setDescription('Clear a number of messages from a specific user')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageMessages)
     .addUserOption(option =>
-        option
-        .setName('user')
+        option.setName('user')
         .setDescription('The user whose messages to delete')
         .setRequired(true)
     )
     .addIntegerOption(option =>
-        option
-        .setName('amount')
+        option.setName('amount')
         .setDescription('Number of messages to delete (1-100)')
         .setRequired(true)
     )
@@ -88,14 +87,12 @@ const commands = [
     .setDescription('Remove a role from a specified user.')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageRoles)
     .addUserOption(option =>
-        option
-        .setName('user')
+        option.setName('user')
         .setDescription('The user to remove the role from')
         .setRequired(true)
     )
     .addRoleOption(option =>
-        option
-        .setName('role')
+        option.setName('role')
         .setDescription('The role to remove from the user')
         .setRequired(true)
     )
@@ -106,14 +103,12 @@ const commands = [
     .setDescription('Assign a role to a specified user.')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageRoles)
     .addUserOption(option =>
-        option
-        .setName('user')
+        option.setName('user')
         .setDescription('The user to assign the role to')
         .setRequired(true)
     )
     .addRoleOption(option =>
-        option
-        .setName('role')
+        option.setName('role')
         .setDescription('The role to assign to the user')
         .setRequired(true)
     )
@@ -124,14 +119,12 @@ const commands = [
     .setDescription('Kick one or more mentioned users or users by ID.')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.KickMembers)
     .addStringOption(option =>
-        option
-        .setName('users')
+        option.setName('users')
         .setDescription('Comma-separated list of mentions or user IDs to kick.')
         .setRequired(true)
     )
     .addBooleanOption(option =>
-        option
-        .setName('global')
+        option.setName('global')
         .setDescription('Kick users from all servers the bot has access to.')
         .setRequired(true)
     )
@@ -142,19 +135,18 @@ const commands = [
     .setDescription('Ban one or more mentioned users or users by ID.')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.BanMembers)
     .addStringOption(option =>
-        option
-        .setName('users')
+        option.setName('users')
         .setDescription('Comma-separated list of mentions or user IDs to ban.')
         .setRequired(true)
     )
     .addBooleanOption(option =>
-        option
-        .setName('global')
+        option.setName('global')
         .setDescription('Ban users from all servers the bot has access to.')
         .setRequired(true)
     )
     .toJSON(),
 ];
+
 
 const rest = new REST({
     version: "10"
@@ -175,8 +167,8 @@ const rest = new REST({
 client.once(Events.ClientReady, () => {
     console.log(`${client.user.username} is online in ${client.guilds.cache.size} guild(s).`);
 
-    // Schedule the task to run every hr
-    cron.schedule('* * * * *', async () => {
+    // Schedule the task to run every 30 minutes
+    cron.schedule('*/30 * * * *', async () => {
         if (state.buttonPressed) return;
 
         try {
@@ -190,7 +182,7 @@ client.once(Events.ClientReady, () => {
                 if (member) {
                     const username = member.user.username;
 
-                    // sends the embed with via username and button
+                    // Creates the button
                     const row = new ActionRowBuilder().addComponents(
                         new ButtonBuilder()
                         .setCustomId(`kick_button_${userId}`)
@@ -203,8 +195,8 @@ client.once(Events.ClientReady, () => {
                         .setColor('Purple');
 
                     /**
-                     * if the orginal msg is there we just update it,
-                     * but if we restart the bot a new msg get send
+                     * If the original message is there, we just update it,
+                     * but if we restart the bot, a new message gets sent
                      */
                     if (state.uveUpdate[userId]) {
                         await state.uveUpdate[userId].edit({
@@ -242,6 +234,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
             console.error('Failed to assign role:', error);
         }
     }
+
     // slap it down here so we can still role the users.
     if (userIdsArray.includes(member.id)) return;
     uve.send({
@@ -254,8 +247,8 @@ client.on(Events.GuildMemberAdd, async (member) => {
 });
 
 client.on(Events.GuildMemberRemove, async (member) => {
-    if (userIdsArray.includes(member.id)) return;    // ingore the users that are in bonk
-    
+    if (userIdsArray.includes(member.id)) return; // ingore the users that are in bonk
+
     uve.send({
         embeds: [
             new EmbedBuilder()
@@ -331,34 +324,41 @@ client.on(Events.InteractionCreate, async (interaction) => {
          */
         switch (cmd) {
             case 'kickleaderboard':
+            case 'clickleaderboard': {
                 try {
-                    const topUsers = await UserStats.find({}).sort({
-                        kicks: -1
-                    }).limit(10);
+                    const isKick = cmd === 'kickleaderboard';
+                    const topStats = isKick ?
+                        await UserStats.find({}).sort({
+                            kicks: -1
+                        }).limit(10) :
+                        await ClickStats.find({}).sort({
+                            clicks: -1
+                        }).limit(10);
 
-                    if (!topUsers.length) {
+                    if (!topStats.length) {
                         return interaction.reply({
-                            content: 'No data available for the leaderboard.',
+                            content: `No data available for the ${isKick ? 'kick' : 'click'} leaderboard.`,
                             flags: MessageFlags.Ephemeral,
                         });
                     }
 
-                    const leaderboard = topUsers
-                        .map((user, index) => `**${index + 1}.** <@${user.userId}> — **Kicks:** ${user.kicks}`)
+                    const rankIcons = ['🥇', '🥈', '🥉'];
+                    const leaderboard = topStats
+                        .map((user, index) => `${rankIcons[index] || `**${index + 1}.**`} <@${user.userId}> — **${isKick ? 'Kicks' : 'Clicks'}:** ${isKick ? user.kicks : user.clicks}`)
                         .join('\n');
-                    const totalKicks = topUsers.reduce((sum, user) => sum + user.kicks, 0);
+                    const totalActions = topStats.reduce((sum, user) => sum + (isKick ? user.kicks : user.clicks), 0);
 
                     const embed = new EmbedBuilder()
-                        .setTitle('🏆 Kick Leaderboard')
-                        .setColor('Red')
+                        .setTitle(`🏆 ${isKick ? 'Kick' : 'Click'} Leaderboard`)
+                        .setColor(isKick ? 'Red' : 'Blue')
                         .setDescription(leaderboard)
                         .addFields({
-                            name: 'Total Kicks',
-                            value: `${totalKicks}`,
+                            name: `Total ${isKick ? 'Kicks' : 'Clicks'}`,
+                            value: `${totalActions}`,
                             inline: true
                         })
                         .setFooter({
-                            text: `Kick Leaderboard updated • ${new Date().toLocaleString()}`,
+                            text: `${isKick ? 'Kick' : 'Click'} Leaderboard updated • ${new Date().toLocaleString()}`,
                             iconURL: interaction.guild.iconURL()
                         });
 
@@ -367,62 +367,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
                         //flags: MessageFlags.Ephemeral
                     });
                 } catch (error) {
-                    console.error('Error fetching leaderboard:', error);
+                    console.error(`Error fetching ${cmd} leaderboard:`, error);
                     await interaction.reply({
-                        content: 'An error occurred while fetching the leaderboard.',
+                        content: `An error occurred while fetching the ${cmd === 'kickleaderboard' ? 'kick' : 'click'} leaderboard.`,
                         flags: MessageFlags.Ephemeral,
                     });
                 }
                 break;
-
-            case 'clickleaderboard':
-                try {
-                    const topClickers = await ClickStats.find({}).sort({
-                        clicks: -1
-                    }).limit(10);
-
-                    if (!topClickers.length) {
-                        return interaction.reply({
-                            content: 'No data available for the button clicker leaderboard.',
-                            flags: MessageFlags.Ephemeral
-                        });
-                    }
-
-                    // Custom icons for ranks
-                    const rankIcons = ['🥇', '🥈', '🥉'];
-
-                    const leaderboard = topClickers
-                        .map((user, index) => `${rankIcons[index]} **${index + 1}.** <@${user.userId}> — **Clicks:** ${user.clicks}`)
-                        .join('\n');
-                    const totalClicks = topClickers.reduce((sum, user) => sum + user.clicks, 0);
-
-                    const embed = new EmbedBuilder()
-                        .setTitle('🏆 Click Leaderboard')
-                        .setColor('Blue')
-                        .setDescription(leaderboard)
-                        .addFields({
-                            name: 'Total Clicks',
-                            value: `${totalClicks}`,
-                            inline: true
-                        })
-                        .setFooter({
-                            text: `Click Leaderboard updated • ${new Date().toLocaleString()}`,
-                            iconURL: interaction.guild.iconURL()
-                        });
-
-                    await interaction.reply({
-                        embeds: [embed],
-                        //flags: MessageFlags.Ephemeral
-                    });
-                } catch (error) {
-                    console.error('Error fetching button clicker leaderboard:', error);
-                    await interaction.reply({
-                        content: 'An error occurred while fetching the button clicker leaderboard.',
-                        flags: MessageFlags.Ephemeral
-                    });
-                }
-                break;
-            case 'clearmsgs':
+            }
+            case 'clearmsgs': {
                 const user = options.getUser('user');
                 const amount = options.getInteger('amount');
 
@@ -455,14 +408,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     });
                 } catch (error) {
                     console.error('Error clearing messages:', error);
-                    return interaction.reply({
+                    interaction.reply({
                         content: 'There was an error processing your request.',
                         flags: MessageFlags.Ephemeral
                     });
                 }
                 break;
+            }
             case 'addrole':
-            case 'removerole':
+            case 'removerole': {
                 const roleUser = options.getUser('user');
                 const role = options.getRole('role');
                 const member = await interaction.guild.members.fetch(roleUser.id);
@@ -482,31 +436,24 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 }
 
                 try {
-                    if (cmd === 'addrole') {
-                        if (member.roles.cache.has(role.id)) {
-                            return interaction.reply({
-                                content: `The user already has the role ${role.name}.`,
-                                flags: MessageFlags.Ephemeral
-                            });
-                        }
-                        await member.roles.add(role);
-                        interaction.reply({
-                            content: `Successfully assigned the role ${role.name} to ${roleUser.username}.`,
-                            ephemeral: false,
-                        });
-                    } else if (cmd === 'removerole') {
-                        if (!member.roles.cache.has(role.id)) {
-                            return interaction.reply({
-                                content: `The user does not have the role ${role.name}.`,
-                                flags: MessageFlags.Ephemeral
-                            });
-                        }
-                        await member.roles.remove(role);
-                        interaction.reply({
-                            content: `Successfully removed the role ${role.name} from ${roleUser.username}.`,
-                            ephemeral: false,
+                    const action = cmd === 'addrole' ? 'add' : 'remove';
+                    const hasRole = member.roles.cache.has(role.id);
+                    const actionVerb = cmd === 'addrole' ? 'assigned' : 'removed';
+                    const alreadyHasRole = action === 'add' && hasRole;
+                    const doesNotHaveRole = action === 'remove' && !hasRole;
+
+                    if (alreadyHasRole || doesNotHaveRole) {
+                        return interaction.reply({
+                            content: `The user ${alreadyHasRole ? 'already has' : 'does not have'} the role ${role.name}.`,
+                            flags: MessageFlags.Ephemeral
                         });
                     }
+
+                    await member.roles[action](role);
+                    interaction.reply({
+                        content: `Successfully ${actionVerb} the role ${role.name} to ${roleUser.username}.`,
+                        ephemeral: false,
+                    });
                 } catch (error) {
                     console.error(`Error managing role:`, error);
                     interaction.reply({
@@ -515,9 +462,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     });
                 }
                 break;
-
+            }
             case 'gkick':
-            case 'gban':
+            case 'gban': {
                 const users = options.getString("users");
                 const globalAction = options.getBoolean("global");
                 const userIdsOrMentions = users.split(',').map(id => id.trim().replace(/[<@!>]/g, ""));
@@ -525,30 +472,31 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const actionVerb = cmd === 'gkick' ? 'kicked' : 'banned';
                 const results = [];
 
+                const performAction = async (guild, userId) => {
+                    try {
+                        const member = await guild.members.fetch(userId).catch(() => null);
+                        if (!member) {
+                            return `❌ User with ID \`${userId}\` could not be found in **${guild.name}**.`;
+                        }
+                        if (action === "kick" && !member.kickable) {
+                            return `❌ Cannot kick <@${userId}> from **${guild.name}** due to role hierarchy or permissions.`;
+                        }
+                        if (action === "ban" && !guild.members.me.permissions.has(PermissionsBitField.Flags.BanMembers)) {
+                            return `❌ Bot lacks permissions to ban members in **${guild.name}**.`;
+                        }
+                        await member[action]({
+                            reason: `${actionVerb} by ${interaction.user.username}`
+                        });
+                        return `✅ Successfully ${actionVerb} <@${userId}> from **${guild.name}**.`;
+                    } catch (error) {
+                        return `❌ Failed to ${action} <@${userId}> from **${guild.name}** - ${error.message}`;
+                    }
+                };
+
                 if (globalAction) {
                     for (const guild of client.guilds.cache.values()) {
                         for (const userId of userIdsOrMentions) {
-                            try {
-                                const member = await guild.members.fetch(userId).catch(() => null);
-                                if (!member) {
-                                    results.push(`❌ User with ID \`${userId}\` could not be found in **${guild.name}**.`);
-                                    continue;
-                                }
-                                if (action === "kick" && !member.kickable) {
-                                    results.push(`❌ Cannot kick <@${userId}> from **${guild.name}** due to role hierarchy or permissions.`);
-                                    continue;
-                                }
-                                if (action === "ban" && !guild.members.me.permissions.has(PermissionsBitField.Flags.BanMembers)) {
-                                    results.push(`❌ Bot lacks permissions to ban members in **${guild.name}**.`);
-                                    continue;
-                                }
-                                await member[action]({
-                                    reason: `${actionVerb} by ${interaction.user.username}`
-                                });
-                                results.push(`✅ Successfully ${actionVerb} <@${userId}> from **${guild.name}**.`);
-                            } catch (error) {
-                                results.push(`❌ Failed to ${action} <@${userId}> from **${guild.name}** - ${error.message}`);
-                            }
+                            results.push(await performAction(guild, userId));
                         }
                     }
                 } else {
@@ -568,23 +516,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     }
 
                     for (const userId of userIdsOrMentions) {
-                        try {
-                            const member = await interaction.guild.members.fetch(userId).catch(() => null);
-                            if (!member) {
-                                results.push(`❌ User with ID \`${userId}\` could not be found in this server.`);
-                                continue;
-                            }
-                            if (action === "kick" && !member.kickable) {
-                                results.push(`❌ Cannot kick <@${userId}> from this server due to role hierarchy or permissions.`);
-                                continue;
-                            }
-                            await member[action]({
-                                reason: `${actionVerb} by ${interaction.user.username}`
-                            });
-                            results.push(`✅ Successfully ${actionVerb} <@${userId}> from this server.`);
-                        } catch (error) {
-                            results.push(`❌ Failed to ${action} <@${userId}> from this server - ${error.message}`);
-                        }
+                        results.push(await performAction(interaction.guild, userId));
                     }
                 }
 
@@ -593,28 +525,42 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     flags: MessageFlags.Ephemeral,
                 });
                 break;
+            }
+
         }
     } else {
         for (const targetUserId of userIdsArray) {
             if (interaction.customId === `kick_button_${targetUserId}`) {
-                const userId = interaction.user.id;
-                const username = interaction.user.username;
+                const {
+                    id: userId,
+                    username
+                } = interaction.user;
 
-                // we ingore the <users> trying to kick them selfs
+                // Ignore the users trying to kick themselves
                 if (userId === targetUserId) {
                     return interaction.reply({
                         content: "You can't bonk yourself!",
-                        flags: MessageFlags.Ephemeral
+                        flags: MessageFlags.Ephemeral,
                     });
                 }
 
-                // Prevents dumbass from kicking snow (was suppose to write this yesterday but slipped my mind LMAO)
+                // Prevent users from kicking themselves or specific users
                 if (userIdsArray.includes(userId)) {
                     return interaction.reply({
                         content: "You are not allowed to use this button!",
-                        flags: MessageFlags.Ephemeral
+                        flags: MessageFlags.Ephemeral,
                     });
                 }
+
+                // Check if the target user is in the guild
+                const tMember = interaction.guild.members.cache.get(targetUserId);
+                if (!tMember) {
+                    return interaction.reply({
+                        content: "The user is not in the guild.",
+                        flags: MessageFlags.Ephemeral,
+                    });
+                }
+
                 await ClickStats.findOneAndUpdate({
                     userId
                 }, {
@@ -630,13 +576,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     embeds: [
                         new EmbedBuilder()
                         .setDescription(`Button clicked by user: ${username} (ID: ${userId})`)
-                        .setColor('Purple')
-                    ]
+                        .setColor('Purple'),
+                    ],
                 });
 
-                const tMember = interaction.guild.members.cache.get(targetUserId);
-
-                // Kicks the <users>
+                // Kick the user
                 await tMember.kick(`We Kicked ${tMember.user.username} HEHE`);
 
                 const sEmbed = new EmbedBuilder()
@@ -651,6 +595,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
     }
 });
+
 
 
 client.login(TOKEN);
