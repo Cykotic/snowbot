@@ -7,7 +7,8 @@ The purpose of this project is to have a bit of fun with Snow by implementing va
 
 ### Slash Commands
 
-- **/leaderboard**: View the kick/ban leaderboard.
+- **/clickleaderboard**: Display the button click leaderboard.
+- **/kickleaderboard**: Display the kick leaderboard.
 - **/clearmsgs**: Clear a number of messages from a specific user.
 - **/removerole**: Remove a role from a specified user.
 - **/addrole**: Assign a role to a specified user.
