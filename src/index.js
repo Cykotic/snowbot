@@ -37,8 +37,7 @@ const client = new Client({
 const {
     TOKEN,
     CLIENT_ID,
-    TARGET_USER_ID,
-    ROLE_ID,
+    TARGET_USER_IDS,
     CHANNEL_ID,
     WEBHOOK_URL
 } = process.env;
@@ -47,9 +46,11 @@ const uve = new WebhookClient({
     url: WEBHOOK_URL
 });
 
+const userIdsArray = TARGET_USER_IDS.split(',');
+
 const state = {
     buttonPressed: false,
-    uveUpdate: null
+    uveUpdate: {}
 };
 
 const commands = [
@@ -165,49 +166,48 @@ const rest = new REST({
     }
 })();
 
-
 client.once(Events.ClientReady, () => {
     console.log(`${client.user.username} is online in ${client.guilds.cache.size} guild(s).`);
 
-    // Schedule the task to run every hour
+    // Schedule the task to run every minute
     cron.schedule('0 * * * *', async () => {
         try {
             if (!state.buttonPressed) {
                 const guild = client.guilds.cache.first();
                 const uvechannel = client.channels.cache.get(CHANNEL_ID);
 
-                // Check if Snow is in the server
-                const member = await guild.members.fetch(TARGET_USER_ID).catch(() => null);
+                for (const userId of userIdsArray) {
 
+                    // Check if the user is in the server
+                    const member = await guild.members.fetch(userId).catch(() => null);
 
-                /**
-                 * if snow in the server we send a embed that constantly keeps updating till pressed. 
-                 * when pressed it'll send a new one insteead of keep resending new ones
-                 */
-                if (member) {
-                    const row = new ActionRowBuilder()
-                        .addComponents(
-                            new ButtonBuilder()
-                            .setCustomId('kick_button')
-                            .setLabel('Kick Snow')
-                            .setStyle(ButtonStyle.Danger)
-                        );
+                    if (member) {
+                        const username = member.user.username;
+                        
+                        // we send are little button and it'll update once it detects
+                        const row = new ActionRowBuilder()
+                            .addComponents(
+                                new ButtonBuilder()
+                                .setCustomId(`kick_button_${userId}`)
+                                .setLabel(`Bonk ${username}`)
+                                .setStyle(ButtonStyle.Danger)
+                            );
 
-                    const embed = new EmbedBuilder()
-                        .setDescription('Press the button to kick Snow')
-                        .setColor('Purple');
+                        const embed = new EmbedBuilder()
+                            .setDescription(`Press the button to bonk ${username}`)
+                            .setColor('Purple');
 
-                    // this is bad but only way i know how to write it sadly.
-                    if (state.uveUpdate) {
-                        await state.uveUpdate.edit({
-                            embeds: [embed],
-                            components: [row]
-                        });
-                    } else {
-                        state.uveUpdate = await uvechannel.send({
-                            embeds: [embed],
-                            components: [row]
-                        });
+                        if (state.uveUpdate[userId]) {
+                            await state.uveUpdate[userId].edit({
+                                embeds: [embed],
+                                components: [row]
+                            });
+                        } else {
+                            state.uveUpdate[userId] = await uvechannel.send({
+                                embeds: [embed],
+                                components: [row]
+                            });
+                        }
                     }
                 }
             }
@@ -216,6 +216,7 @@ client.once(Events.ClientReady, () => {
         }
     });
 });
+
 
 client.on(Events.GuildBanAdd, async (ban) => {
     const {
@@ -241,18 +242,26 @@ client.on(Events.GuildBanAdd, async (ban) => {
 });
 
 client.on(Events.GuildMemberAdd, async (member) => {
-    if (member.id === TARGET_USER_ID) {
-        const role = member.guild.roles.cache.get(ROLE_ID);
+    const userRoleMap = {
+        "487060202621894657": "1210482229340274689", // "SNOW" : 'HEADMOD
+        "1108162232774299729": "1308540258778091650" // "DUMBASS" : "SERVER RETARD"
+    };
+
+    const roleId = userRoleMap[member.id];
+    if (roleId) {
+        const role = member.guild.roles.cache.get(roleId);
         if (!role) return console.error('Role not found');
 
         try {
-            // we had 'head mod' role to snow. 
+            // we Assign the roles based on what role map (it's ugly i know.)
             await member.roles.add(role);
+            console.log(`Role ${role.name} assigned to member with ID: ${member.id}`);
         } catch (error) {
             console.error('Failed to assign role:', error);
         }
     }
 });
+
 
 client.on(Events.GuildMemberRemove, async (member) => {
     const {
@@ -287,20 +296,19 @@ client.on(Events.GuildMemberRemove, async (member) => {
              * unfortunately, can't use this code because for some reason dms are still turned off makes no sense.
              */
 
-            //     // we create the invite for snow, beause this mf keeps getting kicked HEHE
-            //     const invite = await guild.invites.create(guild.channels.cache.first(), {
-            //         maxUses: 1,
-            //         unique: true
-            //     });
-            //     console.log(`Invite created for ${user.username}: ${invite.url}`);
+            // we create the invite for snow, beause this mf keeps getting kicked HEHE
+            // const invite = await guild.invites.create(guild.channels.cache.first(), {
+            //     maxUses: 1,
+            //     unique: true
+            // });
+            // console.log(`Invite created for ${user.username}: ${invite.url}`);
 
-            //     // send this mf a invite using his Id (i got lazy on sending him)
-            //     const uve = await client.users.fetch(TARGET_USER_ID)
-            //     try {
-            //         await uve.send(`You have been re-invited to the server: ${invite.url}`);
-            //     } catch (dmError) {
-            //         console.error(`Could not send DM to ${user.username}:`, dmError);
-            //     }
+            // // send this mf a invite using his Id (i got lazy on sending him)
+            // const uve = await client.users.fetch(TARGET_USER_ID)
+            // try {
+            //     await uve.send(`You have been re-invited to the server: ${invite.url}`);
+            // } catch (dmError) {
+            //     console.error(`Could not send DM to ${user.username}:`, dmError);
             // }
         }
     } catch (error) {
@@ -551,46 +559,53 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 });
                 break;
         }
-    } else if (interaction.customId === 'kick_button') {
-        const userId = interaction.user.id;
-        const username = interaction.user.username;
+    } else {
+        for (const targetUserId of userIdsArray) {
+            if (interaction.customId === `kick_button_${targetUserId}`) {
+                const userId = interaction.user.id;
+                const username = interaction.user.username;
 
-        // we ignore snow, and don't log anything when he's pressing shit.
-        if (userId === TARGET_USER_ID) return
+                // we ingore the <uusers> trying to kick them selfs
+                if (userId === targetUserId) {
+                    return interaction.reply({
+                        content: "You can't bonk yourself!",
+                        ephemeral: true
+                    });
+                }
 
-        uve.send({
-            embeds: [
-                new EmbedBuilder()
-                .setDescription(`Button clicked by user: ${username} (ID: ${userId})`)
-                .setColor('Purple')
-            ]
-        });
+            // Prevents dumbass from kicking snow (was suppose to write this yesterday but slipped my mind LMAO)
+            if (userIdsArray.includes(userId)) {
+                return interaction.reply({
+                    content: "You are not allowed to use this button!",
+                    ephemeral: true
+                });
+            }
 
-        const tMember = interaction.guild.members.cache.get(TARGET_USER_ID);
+                uve.send({
+                    embeds: [
+                        new EmbedBuilder()
+                        .setDescription(`Button clicked by user: ${username} (ID: ${userId})`)
+                        .setColor('Purple')
+                    ]
+                });
 
-        if (!tMember) {
-            const notFoundEmbed = new EmbedBuilder()
-                .setDescription('User not found in the guild.')
-                .setColor('Purple');
+                const tMember = interaction.guild.members.cache.get(targetUserId);
 
-            return await interaction.update({
-                embeds: [notFoundEmbed],
-                components: [],
-            });
+                // Kick the <users>
+                await tMember.kick(`We Kicked ${tMember.user.username} HEHE`);
+
+                const sEmbed = new EmbedBuilder()
+                    .setDescription(`${tMember.user.username} has been kicked.`)
+                    .setColor('Purple');
+
+                return await interaction.update({
+                    embeds: [sEmbed],
+                    components: [],
+                });
+            }
         }
-
-        // we kick Snow LMAO
-        await tMember.kick('We Kicked Snow HEHE');
-
-        const sEmbed = new EmbedBuilder()
-            .setDescription(`${tMember.user.username} has been kicked.`)
-            .setColor('Purple');
-
-        return await interaction.update({
-            embeds: [sEmbed],
-            components: [],
-        });
     }
 });
+
 
 client.login(TOKEN);
