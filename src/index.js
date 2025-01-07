@@ -22,7 +22,8 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     WebhookClient,
-    MessageFlags
+    MessageFlags,
+    StringSelectMenuBuilder,
 } = require('discord.js');
 const {
     UserStats,
@@ -79,6 +80,8 @@ const commands = [
         option.setName('amount')
         .setDescription('Number of messages to delete (1-100)')
         .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(100)
     )
     .toJSON(),
 
@@ -169,23 +172,43 @@ client.once(Events.ClientReady, () => {
 
     // Schedule the task to run every 30 minutes
     cron.schedule('*/30 * * * *', async () => {
-        if (state.buttonPressed) return;
+        console.log('Scheduled task started.');
+
+        if (state.buttonPressed) {
+            console.log('Button has been pressed, skipping task execution.');
+            return;
+        }
 
         try {
             const guild = client.guilds.cache.first();
             const uveChannel = client.channels.cache.get(CHANNEL_ID);
 
-            for (const userId of userIdsArray) {
-                // Check if the user is in the server
-                const member = await guild.members.fetch(userId).catch(() => null);
+            console.log('Fetching members for userIds:', userIdsArray);
+
+            // Fetch the members only once
+            const members = await Promise.all(
+                userIdsArray.map(userId => {
+                    return guild.members.fetch(userId).catch((error) => {
+                        console.error(`Failed to fetch member with ID ${userId}:`, error);
+                        return null;
+                    });
+                })
+            );
+    
+
+            console.log('Members fetched:', members.filter(member => member !== null).map(member => member.user.username));
+
+            for (let i = 0; i < userIdsArray.length; i++) {
+                const member = members[i];
 
                 if (member) {
                     const username = member.user.username;
 
-                    // Creates the button
+                    console.log(`Creating button for ${username} with ID ${userIdsArray[i]}`);
+
                     const row = new ActionRowBuilder().addComponents(
                         new ButtonBuilder()
-                        .setCustomId(`kick_button_${userId}`)
+                        .setCustomId(`kick_button_${userIdsArray[i]}`)
                         .setLabel(`Bonk ${username}`)
                         .setStyle(ButtonStyle.Danger)
                     );
@@ -194,17 +217,18 @@ client.once(Events.ClientReady, () => {
                         .setDescription(`Press the button to bonk ${username}`)
                         .setColor('Purple');
 
-                    /**
-                     * If the original message is there, we just update it,
-                     * but if we restart the bot, a new message gets sent
-                     */
-                    if (state.uveUpdate[userId]) {
-                        await state.uveUpdate[userId].edit({
+                    // If the original message is there, just update it,
+                    // but if the bot is restarted, a new message gets sent
+                    const userState = state.uveUpdate[userIdsArray[i]];
+                    if (userState) {
+                        console.log(`Updating message for ${username}`);
+                        await userState.edit({
                             embeds: [embed],
                             components: [row]
                         });
                     } else {
-                        state.uveUpdate[userId] = await uveChannel.send({
+                        console.log(`Sending new message for ${username}`);
+                        state.uveUpdate[userIdsArray[i]] = await uveChannel.send({
                             embeds: [embed],
                             components: [row]
                         });
@@ -327,45 +351,51 @@ client.on(Events.InteractionCreate, async (interaction) => {
             case 'clickleaderboard': {
                 try {
                     const isKick = cmd === 'kickleaderboard';
-                    const topStats = isKick ?
-                        await UserStats.find({}).sort({
-                            kicks: -1
-                        }).limit(10) :
-                        await ClickStats.find({}).sort({
-                            clicks: -1
-                        }).limit(10);
+                    const statModel = isKick ? UserStats : ClickStats;
+                    const statType = isKick ? 'kicks' : 'clicks';
+
+                    const topStats = await statModel.find({})
+                        .sort({
+                            [statType]: -1
+                        })
+                        .limit(10);
 
                     if (!topStats.length) {
                         return interaction.reply({
-                            content: `No data available for the ${isKick ? 'kick' : 'click'} leaderboard.`,
+                            embeds: [
+                                new EmbedBuilder()
+                                .setDescription(`No data available for the ${isKick ? 'kick' : 'click'} leaderboard.`)
+                                .setColor('Purple')
+                            ],
                             flags: MessageFlags.Ephemeral,
                         });
                     }
 
                     const rankIcons = ['🥇', '🥈', '🥉'];
-                    const leaderboard = topStats
-                        .map((user, index) => `${rankIcons[index] || `**${index + 1}.**`} <@${user.userId}> — **${isKick ? 'Kicks' : 'Clicks'}:** ${isKick ? user.kicks : user.clicks}`)
-                        .join('\n');
-                    const totalActions = topStats.reduce((sum, user) => sum + (isKick ? user.kicks : user.clicks), 0);
+                    const leaderboard = topStats.map((user, index) => {
+                        const rank = rankIcons[index] || `**${index + 1}.**`;
+                        return `${rank} <@${user.userId}> — **${statType.charAt(0).toUpperCase() + statType.slice(1)}:** ${user[statType]}`;
+                    }).join('\n');
 
-                    const embed = new EmbedBuilder()
-                        .setTitle(`🏆 ${isKick ? 'Kick' : 'Click'} Leaderboard`)
-                        .setColor(isKick ? 'Red' : 'Blue')
-                        .setDescription(leaderboard)
-                        .addFields({
-                            name: `Total ${isKick ? 'Kicks' : 'Clicks'}`,
-                            value: `${totalActions}`,
-                            inline: true
-                        })
-                        .setFooter({
-                            text: `${isKick ? 'Kick' : 'Click'} Leaderboard updated • ${new Date().toLocaleString()}`,
-                            iconURL: interaction.guild.iconURL()
-                        });
+                    const totalActions = topStats.reduce((sum, user) => sum + user[statType], 0);
 
                     await interaction.reply({
-                        embeds: [embed],
-                        //flags: MessageFlags.Ephemeral
-                    });
+                        embeds: [
+                            new EmbedBuilder()
+                            .setTitle(`🏆 ${isKick ? 'Kick' : 'Click'} Leaderboard`)
+                            .setColor(isKick ? 'Red' : 'Blue')
+                            .setDescription(leaderboard)
+                            .addFields({
+                                name: `Total ${statType.charAt(0).toUpperCase() + statType.slice(1)}s`,
+                                value: `${totalActions}`,
+                                inline: true,
+                            })
+                            .setFooter({
+                                text: `${isKick ? 'Kick' : 'Click'} Leaderboard updated • ${new Date().toLocaleString()}`,
+                                iconURL: interaction.guild.iconURL(),
+                            })
+                        ]
+                    })
                 } catch (error) {
                     console.error(`Error fetching ${cmd} leaderboard:`, error);
                     await interaction.reply({
@@ -379,10 +409,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const user = options.getUser('user');
                 const amount = options.getInteger('amount');
 
-                // Validate the amount of messages to delete
                 if (amount < 1 || amount > 100) {
                     return interaction.reply({
-                        content: 'Please specify a valid number of messages to delete (1-100).',
+                        embeds: [
+                            new EmbedBuilder()
+                            .setDescription('Please specify a valid number of messages to delete (1-100).')
+                            .setColor('Purple')
+                        ],
                         flags: MessageFlags.Ephemeral,
                     });
                 }
@@ -393,17 +426,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     });
                     const userMessages = messages.filter(msg => msg.author.id === user.id).first(amount);
 
-                    // Check if there are any messages to delete
                     if (!userMessages.length) {
                         return interaction.reply({
-                            content: `No messages found from <@${user.id}>.`,
+                            embeds: [
+                                new EmbedBuilder()
+                                .setDescription(`No messages found from <@${user.id}>.`)
+                                .setColor('Purple')
+
+                            ],
                             flags: MessageFlags.Ephemeral
                         });
                     }
 
                     await interaction.channel.bulkDelete(userMessages, true);
                     return interaction.reply({
-                        content: `Cleared ${userMessages.length} messages from <@${user.id}>.`,
+                        embeds: [
+                            new EmbedBuilder()
+                            .setDescription(`Cleared ${userMessages.length} messages from <@${user.id}>.`)
+                            .setColor('Purple')
+                        ],
                         flags: MessageFlags.Ephemeral
                     });
                 } catch (error) {
@@ -419,18 +460,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
             case 'removerole': {
                 const roleUser = options.getUser('user');
                 const role = options.getRole('role');
-                const member = await interaction.guild.members.fetch(roleUser.id);
+                const member = await interaction.guild.members.fetch(roleUser.id).catch(() => null);
 
                 if (!member) {
                     return interaction.reply({
-                        content: 'User not found in this server.',
+                        embeds: [
+                            new EmbedBuilder()
+                            .setDescription(`User ${roleUser.username} is not a member of this server.`)
+                            .setColor('Purple')
+                        ],
                         flags: MessageFlags.Ephemeral
                     });
                 }
 
                 if (role.position >= interaction.guild.members.me.roles.highest.position) {
                     return interaction.reply({
-                        content: `I cannot manage the role ${role.name} because it is higher than or equal to my highest role.`,
+                        embeds: [
+                            new EmbedBuilder()
+                            .setDescription(`I cannot manage the role ${role.name} because it is higher than or equal to my highest role.`)
+                        ],
                         flags: MessageFlags.Ephemeral
                     });
                 }
@@ -438,26 +486,45 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 try {
                     const action = cmd === 'addrole' ? 'add' : 'remove';
                     const hasRole = member.roles.cache.has(role.id);
-                    const actionVerb = cmd === 'addrole' ? 'assigned' : 'removed';
-                    const alreadyHasRole = action === 'add' && hasRole;
-                    const doesNotHaveRole = action === 'remove' && !hasRole;
+                    const actionVerb = cmd === 'addrole' ? 'added' : 'removed';
 
-                    if (alreadyHasRole || doesNotHaveRole) {
+                    if (action === 'add' && hasRole) {
                         return interaction.reply({
-                            content: `The user ${alreadyHasRole ? 'already has' : 'does not have'} the role ${role.name}.`,
+                            embeds: [
+                                new EmbedBuilder()
+                                .setDescription(`The user ${roleUser.username} already has the role ${role.name}.`)
+                                .setColor('Purple')
+                            ],
+                            flags: MessageFlags.Ephemeral
+                        });
+                    }
+
+                    if (action === 'remove' && !hasRole) {
+                        return interaction.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                .setDescription(`The user ${roleUser.username} does not have the role ${role.name}.`, )
+                                .setColor('Purple')
+                            ],
                             flags: MessageFlags.Ephemeral
                         });
                     }
 
                     await member.roles[action](role);
-                    interaction.reply({
-                        content: `Successfully ${actionVerb} the role ${role.name} to ${roleUser.username}.`,
-                        ephemeral: false,
+
+                    return interaction.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                            .setDescription(`Successfully ${actionVerb} the role ${role.name} ${action === 'add' ? 'to' : 'from'} ${roleUser.username}.`)
+                            .setColor('Purple')
+                        ],
+                        flags: MessageFlags.Ephemeral
                     });
                 } catch (error) {
-                    console.error(`Error managing role:`, error);
+                    console.error(`Error managing role for ${roleUser.username}:`, error);
+
                     interaction.reply({
-                        content: `There was an error while trying to manage the role.`,
+                        content: `An error occurred while trying to ${cmd === 'addrole' ? 'assign' : 'remove'} the role ${role.name}. Please ensure I have the necessary permissions and try again.`,
                         flags: MessageFlags.Ephemeral
                     });
                 }
@@ -467,23 +534,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
             case 'gban': {
                 const users = options.getString("users");
                 const globalAction = options.getBoolean("global");
-                const userIdsOrMentions = users.split(',').map(id => id.trim().replace(/[<@!>]/g, ""));
+                const userIds = users.split(',').map(id => id.trim().replace(/[<@!>]/g, ""));
                 const action = cmd === 'gkick' ? 'kick' : 'ban';
                 const actionVerb = cmd === 'gkick' ? 'kicked' : 'banned';
-                const results = [];
 
                 const performAction = async (guild, userId) => {
                     try {
                         const member = await guild.members.fetch(userId).catch(() => null);
-                        if (!member) {
-                            return `❌ User with ID \`${userId}\` could not be found in **${guild.name}**.`;
-                        }
+                        if (!member) return `❌ User with ID \`${userId}\` not found in **${guild.name}**.`;
+
                         if (action === "kick" && !member.kickable) {
                             return `❌ Cannot kick <@${userId}> from **${guild.name}** due to role hierarchy or permissions.`;
                         }
+
                         if (action === "ban" && !guild.members.me.permissions.has(PermissionsBitField.Flags.BanMembers)) {
                             return `❌ Bot lacks permissions to ban members in **${guild.name}**.`;
                         }
+
                         await member[action]({
                             reason: `${actionVerb} by ${interaction.user.username}`
                         });
@@ -493,109 +560,167 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     }
                 };
 
+                const processActionAcrossGuilds = async (guilds, userIds) => {
+                    const results = [];
+                    for (const guild of guilds) {
+                        const guildResults = await Promise.all(userIds.map(userId => performAction(guild, userId)));
+                        results.push(...guildResults);
+                    }
+                    return results;
+                };
+
                 if (globalAction) {
-                    for (const guild of client.guilds.cache.values()) {
-                        for (const userId of userIdsOrMentions) {
-                            results.push(await performAction(guild, userId));
-                        }
-                    }
+                    const guilds = Array.from(client.guilds.cache.values());
+                    const results = await processActionAcrossGuilds(guilds, userIds);
+
+                    await interaction.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                            .setDescription(results.join("\n"))
+                            .setColor('Purple')
+                        ],
+                        flags: MessageFlags.Ephemeral,
+                    });
+
                 } else {
-                    if (!interaction.guild) {
-                        return interaction.reply({
-                            content: "This command can only be used in a server.",
-                            flags: MessageFlags.Ephemeral
-                        });
-                    }
+                    const selectMenu = new StringSelectMenuBuilder()
+                        .setCustomId('guildSelect')
+                        .setPlaceholder('Select the guild(s) to perform the action on.')
+                        .setMinValues(1)
+                        .setMaxValues(client.guilds.cache.size)
+                        .addOptions(
+                            client.guilds.cache.map(guild => ({
+                                label: guild.name,
+                                value: guild.id,
+                            }))
+                        );
 
-                    const permissionCheck = action === "kick" ? PermissionsBitField.Flags.KickMembers : PermissionsBitField.Flags.BanMembers;
-                    if (!interaction.member.permissions.has(permissionCheck)) {
-                        return interaction.reply({
-                            content: `You lack the required permissions to ${action} members.`,
-                            flags: MessageFlags.Ephemeral
-                        });
-                    }
+                    const actionRow = new ActionRowBuilder().addComponents(selectMenu);
 
-                    for (const userId of userIdsOrMentions) {
-                        results.push(await performAction(interaction.guild, userId));
-                    }
+                    await interaction.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                            .setColor('Purple')
+                            .setTitle(`Select the guild(s) to ${action} the users in:`)
+                            .setDescription('Use the dropdown menu below to select one or more guilds.')
+                        ],
+                        components: [actionRow],
+                        flags: MessageFlags.Ephemeral,
+                    });
+
+                    const filter = i => i.customId === 'guildSelect' && i.user.id === interaction.user.id;
+                    const collector = interaction.channel.createMessageComponentCollector({
+                        filter,
+                        time: 15000 // 15 seconds to choose
+                    });
+
+                    collector.on('collect', async i => {
+                        const selectedGuildIds = i.values;
+                        const selectedGuilds = selectedGuildIds.map(id => client.guilds.cache.get(id));
+
+                        if (selectedGuilds.length === 0) {
+                            return i.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                    .setDescription('No guilds were selected, aborting action.')
+                                    .setColor('Purple')
+                                ],
+                                flags: MessageFlags.Ephemeral,
+                            });
+                        }
+
+                        const results = await processActionAcrossGuilds(selectedGuilds, userIds);
+                        await i.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                .setDescription(results.join("\n"))
+                            ],
+                            flags: MessageFlags.Ephemeral,
+                        });
+                    });
+
+                    collector.on('end', async collected => {
+                        if (collected.size === 0) {
+                            const disabledSelectMenu = selectMenu.setDisabled(true);
+                            const disabledActionRow = new ActionRowBuilder().addComponents(disabledSelectMenu);
+
+                            await interaction.editReply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                    .setColor('Purple')
+                                    .setTitle('No selection made. Action aborted.')
+                                ],
+                                components: [disabledActionRow],
+                                flags: MessageFlags.Ephemeral,
+                            });
+                        }
+                    });
                 }
-
-                await interaction.reply({
-                    content: results.join("\n"),
-                    flags: MessageFlags.Ephemeral,
-                });
-                break;
             }
-
+            break;
         }
     } else {
         for (const targetUserId of userIdsArray) {
-            if (interaction.customId === `kick_button_${targetUserId}`) {
-                const {
-                    id: userId,
-                    username
-                } = interaction.user;
+            if (interaction.customId !== `kick_button_${targetUserId}`) continue;
 
-                // Ignore the users trying to kick themselves
-                if (userId === targetUserId) {
-                    return interaction.reply({
-                        content: "You can't bonk yourself!",
-                        flags: MessageFlags.Ephemeral,
-                    });
-                }
+            const {
+                id: userId,
+                username
+            } = interaction.user;
 
-                // Prevent users from kicking themselves or specific users
-                if (userIdsArray.includes(userId)) {
-                    return interaction.reply({
-                        content: "You are not allowed to use this button!",
-                        flags: MessageFlags.Ephemeral,
-                    });
-                }
-
-                // Check if the target user is in the guild
-                const tMember = interaction.guild.members.cache.get(targetUserId);
-                if (!tMember) {
-                    return interaction.reply({
-                        content: "The user is not in the guild.",
-                        flags: MessageFlags.Ephemeral,
-                    });
-                }
-
-                await ClickStats.findOneAndUpdate({
-                    userId
-                }, {
-                    $inc: {
-                        clicks: 1
-                    }
-                }, {
-                    upsert: true,
-                    new: true
-                });
-
-                uve.send({
-                    embeds: [
-                        new EmbedBuilder()
-                        .setDescription(`Button clicked by user: ${username} (ID: ${userId})`)
-                        .setColor('Purple'),
-                    ],
-                });
-
-                // Kick the user
-                await tMember.kick(`We Kicked ${tMember.user.username} HEHE`);
-
-                const sEmbed = new EmbedBuilder()
-                    .setDescription(`${tMember.user.username} has been kicked.`)
-                    .setColor('Purple');
-
-                return await interaction.update({
-                    embeds: [sEmbed],
-                    components: [],
+            // Check if the user is trying to kick themselves
+            if (userId === targetUserId) {
+                return interaction.reply({
+                    content: "You can't bonk yourself!",
+                    flags: MessageFlags.Ephemeral,
                 });
             }
+
+            if (userIdsArray.includes(userId)) {
+                return interaction.reply({
+                    content: "You are not allowed to use this button!",
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+            const tMember = interaction.guild.members.cache.get(targetUserId);
+            if (!tMember) {
+                return interaction.reply({
+                    content: "The user is not in the guild.",
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+
+            await ClickStats.findOneAndUpdate({
+                userId
+            }, {
+                $inc: {
+                    clicks: 1
+                }
+            }, {
+                upsert: true,
+                new: true
+            });
+
+            await uve.send({
+                embeds: [
+                    new EmbedBuilder()
+                    .setDescription(`Button clicked by user: ${username} (ID: ${userId})`)
+                    .setColor('Purple'),
+                ],
+            });
+
+            await tMember.kick(`We Kicked ${tMember.user.username} HEHE`);
+
+            const sEmbed = new EmbedBuilder()
+                .setDescription(`${tMember.user.username} has been kicked.`)
+                .setColor('Purple');
+
+            return await interaction.update({
+                embeds: [sEmbed],
+                components: [],
+            });
         }
     }
 });
-
-
 
 client.login(TOKEN);
