@@ -168,14 +168,8 @@ const rest = new REST({
 })();
 
 client.once(Events.ClientReady, () => {
-    console.log(`${client.user.username} is online in ${client.guilds.cache.size} guild(s).`);
-
-    // Schedule the task to run every 30 minutes
     cron.schedule('*/30 * * * *', async () => {
-        console.log('Scheduled task started.');
-
         if (state.buttonPressed) {
-            console.log('Button has been pressed, skipping task execution.');
             return;
         }
 
@@ -183,28 +177,17 @@ client.once(Events.ClientReady, () => {
             const guild = client.guilds.cache.first();
             const uveChannel = client.channels.cache.get(CHANNEL_ID);
 
-            console.log('Fetching members for userIds:', userIdsArray);
-
-            // Fetch the members only once
             const members = await Promise.all(
                 userIdsArray.map(userId => {
-                    return guild.members.fetch(userId).catch((error) => {
-                        console.error(`Failed to fetch member with ID ${userId}:`, error);
-                        return null;
-                    });
+                    return guild.members.fetch(userId).catch(() => null);
                 })
             );
-    
-
-            console.log('Members fetched:', members.filter(member => member !== null).map(member => member.user.username));
 
             for (let i = 0; i < userIdsArray.length; i++) {
                 const member = members[i];
 
                 if (member) {
                     const username = member.user.username;
-
-                    console.log(`Creating button for ${username} with ID ${userIdsArray[i]}`);
 
                     const row = new ActionRowBuilder().addComponents(
                         new ButtonBuilder()
@@ -217,17 +200,13 @@ client.once(Events.ClientReady, () => {
                         .setDescription(`Press the button to bonk ${username}`)
                         .setColor('Purple');
 
-                    // If the original message is there, just update it,
-                    // but if the bot is restarted, a new message gets sent
                     const userState = state.uveUpdate[userIdsArray[i]];
                     if (userState) {
-                        console.log(`Updating message for ${username}`);
                         await userState.edit({
                             embeds: [embed],
                             components: [row]
                         });
                     } else {
-                        console.log(`Sending new message for ${username}`);
                         state.uveUpdate[userIdsArray[i]] = await uveChannel.send({
                             embeds: [embed],
                             components: [row]
@@ -240,6 +219,7 @@ client.once(Events.ClientReady, () => {
         }
     });
 });
+
 
 client.on(Events.GuildMemberAdd, async (member) => {
     const userRoleMap = {
