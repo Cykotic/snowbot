@@ -206,10 +206,8 @@ client.once(Events.ClientReady, async () => {
          * activity update and setting for interval 
          * hopfully this doesn't conflict with anything
          */
-        updateActivity();
-        setInterval(() => {
-            updateActivity();
-        }, 10000); // update every 10 secs
+        await updateActivity();
+        setInterval(updateActivity, 10000); // update every 10 secs
 
         /**
          * send every 30 mins
@@ -774,12 +772,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
     } else {
         for (const targetUserId of state.userIdsArray) {
             if (interaction.customId !== `kick_button_${targetUserId}`) continue;
-
-            const {
-                id: userId,
-                username
-            } = interaction.user;
-
+    
+            const { id: userId, username } = interaction.user;
+    
             /**
              * snow keeps trying to kick himself
              */
@@ -789,7 +784,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     flags: MessageFlags.Ephemeral,
                 });
             }
-
+    
             /**
              * mac kept kicking snow.
              */
@@ -799,7 +794,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     flags: MessageFlags.Ephemeral,
                 });
             }
-
+    
             const tMember = interaction.guild.members.cache.get(targetUserId);
             if (!tMember) {
                 return interaction.reply({
@@ -807,18 +802,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     flags: MessageFlags.Ephemeral,
                 });
             }
-
-            await ClickStats.findOneAndUpdate({
-                userId
-            }, {
-                $inc: {
-                    clicks: 1
-                }
-            }, {
-                upsert: true,
-                new: true
-            });
-
+    
+            await ClickStats.findOneAndUpdate(
+                { userId },
+                { $inc: { clicks: 1 } },
+                { upsert: true, new: true }
+            );
+    
             await uve.send({
                 embeds: [
                     new EmbedBuilder()
@@ -826,13 +816,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     .setColor('Purple'),
                 ],
             });
-
+    
             await tMember.kick(`We Kicked ${tMember.user.username} HEHE`);
-
+    
             const sEmbed = new EmbedBuilder()
                 .setDescription(`${tMember.user.username} has been kicked.`)
                 .setColor('Purple');
-
+    
             return await interaction.update({
                 embeds: [sEmbed],
                 components: [],
@@ -840,5 +830,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
     }
 });
+    
 
 client.login(TOKEN);
