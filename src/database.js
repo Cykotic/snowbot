@@ -1,18 +1,16 @@
 const mongoose = require('mongoose');
 require('dotenv').config();
 
-const {
-    mongoURL
-} = process.env;
+const { mongoURL } = process.env;
 
 mongoose.set('strictQuery', true);
 
 mongoose.connect(mongoURL, {
-        keepAlive: true,
-        useNewUrlParser: true,
-        useUnifiedTopology: true,
-    })
-    .then(() => console.log('Connected to MongoDB'))
+    keepAlive: true,
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+})
+    .then(() => console.log('Successfully connected to mongooseB'))
     .catch(err => console.error('MongoDB connection error:', err));
 
 // User Schema
@@ -40,10 +38,21 @@ const clickSchema = new mongoose.Schema({
     },
 });
 
+// User ID Schema
+const userIdSchema = new mongoose.Schema({
+    userId: {
+        type: String,
+        required: true,
+        unique: true,
+    },
+});
+
 const ClickStats = mongoose.model('ClickStats', clickSchema);
 const UserStats = mongoose.model('UserStats', userSchema);
+const UserIds = mongoose.model('UserIds', userIdSchema);
 
 module.exports = {
     UserStats,
     ClickStats,
+    UserIds,
 };
