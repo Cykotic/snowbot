@@ -240,8 +240,8 @@ client.once(Events.ClientReady, async () => {
                     .setColor('Purple');
 
                 /**
-                * this will send/update itself
-                */
+                 * this will send/update itself
+                 */
                 const userState = state.uveUpdate[state.userIdsArray[index]];
                 if (userState) {
                     await userState.edit({
@@ -544,6 +544,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 break
             }
 
+            /**
+             * TODO: FIX THE GBAN SO WE BAN MFS THAT AREN'T IN THE SERVER
+             */
             case 'gkick':
             case 'gban': {
                 const users = options.getString("users");
@@ -552,10 +555,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const action = cmd === 'gkick' ? 'kick' : 'ban';
                 const actionVerb = cmd === 'gkick' ? 'kicked' : 'banned';
 
-                const performAction = async (guild, userId) => {
+                const performAction = async (guild, userId, action, actionVerb) => {
                     try {
                         const member = await guild.members.fetch(userId).catch(() => null);
-                        if (!member) return `❌ User with ID \`${userId}\` not found in **${guild.name}**.`;
+                        if (!member) {
+                            if (action === "ban") {
+                                await guild.members.ban(userId, {
+                                    reason: `${actionVerb} by ${interaction.user.username}`
+                                });
+                                return `✅ Successfully ${actionVerb} user with ID \`${userId}\` from **${guild.name}**.`;
+                            }
+                            return `❌ User with ID \`${userId}\` not found in **${guild.name}**.`;
+                        }
 
                         if (action === "kick" && !member.kickable) {
                             return `❌ Cannot kick <@${userId}> from **${guild.name}** due to role hierarchy or permissions.`;
@@ -574,10 +585,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     }
                 };
 
-                const processActionAcrossGuilds = async (guilds, userIds) => {
+                const processActionAcrossGuilds = async (guilds, userIds, action, actionVerb) => {
                     const results = [];
                     for (const guild of guilds) {
-                        const guildResults = await Promise.all(userIds.map(userId => performAction(guild, userId)));
+                        const guildResults = await Promise.all(userIds.map(userId => performAction(guild, userId, action, actionVerb)));
                         results.push(...guildResults);
                     }
                     return results;
@@ -585,7 +596,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                 if (globalAction) {
                     const guilds = Array.from(client.guilds.cache.values());
-                    const results = await processActionAcrossGuilds(guilds, userIds);
+                    const results = await processActionAcrossGuilds(guilds, userIds, action, actionVerb);
 
                     await interaction.reply({
                         embeds: [
@@ -643,11 +654,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
                             });
                         }
 
-                        const results = await processActionAcrossGuilds(selectedGuilds, userIds);
+                        const results = await processActionAcrossGuilds(selectedGuilds, userIds, action, actionVerb);
                         await i.reply({
                             embeds: [
                                 new EmbedBuilder()
                                 .setDescription(results.join("\n"))
+                                .setColor('Purple')
                             ],
                             flags: MessageFlags.Ephemeral,
                         });
@@ -676,7 +688,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             case "bonk": {
                 const action = options.getString('action');
                 const user = options.getUser('user');
-            
+
                 if (!action || !user) {
                     return interaction.reply({
                         embeds: [
@@ -687,12 +699,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
                         flags: MessageFlags.Ephemeral,
                     });
                 }
-            
+
                 const userId = user.id;
-            
+
                 try {
                     if (action === 'add') {
-                        const existingUser = await UserIds.findOne({ userId });
+                        const existingUser = await UserIds.findOne({
+                            userId
+                        });
                         if (existingUser) {
                             return interaction.reply({
                                 embeds: [
@@ -703,10 +717,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
                                 flags: MessageFlags.Ephemeral,
                             });
                         }
-            
-                        await UserIds.create({ userId });
+
+                        await UserIds.create({
+                            userId
+                        });
                         state.userIdsArray.push(userId); // Update the state array with the new user
-            
+
                         return interaction.reply({
                             embeds: [
                                 new EmbedBuilder()
@@ -716,7 +732,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
                             flags: MessageFlags.Ephemeral,
                         });
                     } else if (action === 'remove') {
-                        const result = await UserIds.deleteOne({ userId });
+                        const result = await UserIds.deleteOne({
+                            userId
+                        });
                         if (result.deletedCount === 0) {
                             return interaction.reply({
                                 embeds: [
@@ -727,9 +745,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
                                 flags: MessageFlags.Ephemeral,
                             });
                         }
-                        
+
                         state.userIdsArray = state.userIdsArray.filter(id => id !== userId); // Remove the user from the state array
-            
+
                         return interaction.reply({
                             embeds: [
                                 new EmbedBuilder()
@@ -751,7 +769,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     });
                 }
                 break;
-            }            
+            }
         }
     } else {
         for (const targetUserId of state.userIdsArray) {
