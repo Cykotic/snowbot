@@ -14,6 +14,7 @@ The purpose of this project is to have a bit of fun with Snow (but it's been exp
 - **/addrole**: Assign a role to a specified user.
 - **/gkick**: Kick one or more mentioned users or users by ID.
 - **/gban**: Ban one or more mentioned users or users by ID.
+- **/bonk**: Add or Remove users from the bonk list.
 
 
 ## Notes
