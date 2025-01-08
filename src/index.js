@@ -1,13 +1,3 @@
-/**
- * The Purpose of this project was to bully snow.
- * it's all creative idea's i've made all store into 1 file,
- * this is the first time i've make a src like this. 
- * so it may be messey with everything all over the place
- * 
- * Made By Avieah
- * Date: 1/3/25
- */
-
 const {
     Client,
     GatewayIntentBits,
@@ -24,10 +14,12 @@ const {
     WebhookClient,
     MessageFlags,
     StringSelectMenuBuilder,
+    ActivityType
 } = require('discord.js');
 const {
     UserStats,
-    ClickStats
+    ClickStats,
+    UserIds
 } = require('./database');
 const cron = require('node-cron');
 require('dotenv').config();
@@ -40,20 +32,21 @@ const client = new Client({
 const {
     TOKEN,
     CLIENT_ID,
-    TARGET_USER_IDS,
     CHANNEL_ID,
     WEBHOOK_URL
 } = process.env;
 
+/**
+ * U've Webhook
+ */
 const uve = new WebhookClient({
     url: WEBHOOK_URL
 });
 
-const userIdsArray = TARGET_USER_IDS.split(',');
-
 const state = {
     buttonPressed: false,
-    uveUpdate: {}
+    uveUpdate: {},
+    userIdsArray: []
 };
 
 const commands = [
@@ -148,6 +141,29 @@ const commands = [
         .setRequired(true)
     )
     .toJSON(),
+
+    new SlashCommandBuilder()
+    .setName('bonk')
+    .setDescription('Manage the bonk list')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageChannels)
+    .addStringOption(option =>
+        option.setName('action')
+        .setDescription('Manage the bonk list (add or remove users)')
+        .setRequired(true)
+        .addChoices({
+            name: 'add',
+            value: 'add'
+        }, {
+            name: 'remove',
+            value: 'remove'
+        })
+    )
+    .addUserOption(option =>
+        option.setName('user')
+        .setDescription('User to bonk')
+        .setRequired(true)
+    )
+    .toJSON(),
 ];
 
 
@@ -167,64 +183,86 @@ const rest = new REST({
     }
 })();
 
-client.once(Events.ClientReady, () => {
-    cron.schedule('*/30 * * * *', async () => {
-        if (state.buttonPressed) {
-            return;
-        }
+client.once(Events.ClientReady, async () => {
+    try {
 
-        try {
+        const updateActivity = () => {
+            const status = `Managing ${state.userIdsArray.length} bonk users`;
+            client.user.setPresence({
+                activities: [{
+                    name: status,
+                    type: ActivityType.Watching
+                }],
+                status: 'dnd',
+            });
+        };
+
+        /**
+         * get the store users from our db
+         */
+        state.userIdsArray = (await UserIds.find({}, 'userId')).map(user => user.userId);
+
+        /**
+         *  activity update and setting for interval 
+         * hopfully this doesn't conflict with anything
+         */
+        updateActivity();
+        setInterval(updateActivity, 10000);
+
+        /**
+         * send every 30 mins
+         */
+        cron.schedule('*/30 * * * *', async () => {
+            if (state.buttonPressed) return;
+
             const guild = client.guilds.cache.first();
             const uveChannel = client.channels.cache.get(CHANNEL_ID);
 
             const members = await Promise.all(
-                userIdsArray.map(userId => {
-                    return guild.members.fetch(userId).catch(() => null);
-                })
+                state.userIdsArray.map(userId => guild.members.fetch(userId).catch(() => null))
             );
 
-            for (let i = 0; i < userIdsArray.length; i++) {
-                const member = members[i];
+            await Promise.all(members.map(async (member, index) => {
+                if (!member) return;
 
-                if (member) {
-                    const username = member.user.username;
+                const username = member.user.username;
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                    .setCustomId(`kick_button_${state.userIdsArray[index]}`)
+                    .setLabel(`Bonk ${username}`)
+                    .setStyle(ButtonStyle.Danger)
+                );
 
-                    const row = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder()
-                        .setCustomId(`kick_button_${userIdsArray[i]}`)
-                        .setLabel(`Bonk ${username}`)
-                        .setStyle(ButtonStyle.Danger)
-                    );
+                const embed = new EmbedBuilder()
+                    .setDescription(`Press the button to bonk ${username}`)
+                    .setColor('Purple');
 
-                    const embed = new EmbedBuilder()
-                        .setDescription(`Press the button to bonk ${username}`)
-                        .setColor('Purple');
-
-                    const userState = state.uveUpdate[userIdsArray[i]];
-                    if (userState) {
-                        await userState.edit({
-                            embeds: [embed],
-                            components: [row]
-                        });
-                    } else {
-                        state.uveUpdate[userIdsArray[i]] = await uveChannel.send({
-                            embeds: [embed],
-                            components: [row]
-                        });
-                    }
+                const userState = state.uveUpdate[state.userIdsArray[index]];
+                if (userState) {
+                    await userState.edit({
+                        embeds: [embed],
+                        components: [row]
+                    });
+                } else {
+                    state.uveUpdate[state.userIdsArray[index]] = await uveChannel.send({
+                        embeds: [embed],
+                        components: [row]
+                    });
                 }
-            }
-        } catch (error) {
-            console.error('An error occurred:', error);
-        }
-    });
+            }));
+        });
+    } catch (error) {
+        console.error('An error occurred:', error);
+    }
 });
-
 
 client.on(Events.GuildMemberAdd, async (member) => {
     const userRoleMap = {
         "487060202621894657": "1210482229340274689", // "SNOW" : 'HEADMOD
-        "1108162232774299729": "1308540258778091650" // "DUMBASS" : "SERVER RETARD"
+        "1108162232774299729": "1308540258778091650" // "DUMBASS (mac's dumbass)" : "SERVER RETARD"
+        /**
+         * don't need to add anymore unless it's "SERVER RETARD"
+         */
     };
 
     const roleId = userRoleMap[member.id];
@@ -239,8 +277,10 @@ client.on(Events.GuildMemberAdd, async (member) => {
         }
     }
 
-    // slap it down here so we can still role the users.
-    if (userIdsArray.includes(member.id)) return;
+    /**
+     * so we don't spam the webhook. when people are getting kicked from bonk list 
+     */
+    if (state.userIdsArray.includes(member.id)) return;
     uve.send({
         embeds: [
             new EmbedBuilder()
@@ -251,7 +291,11 @@ client.on(Events.GuildMemberAdd, async (member) => {
 });
 
 client.on(Events.GuildMemberRemove, async (member) => {
-    if (userIdsArray.includes(member.id)) return; // ingore the users that are in bonk
+
+    /**
+     * so we don't spam the webhook. when people are getting kicked from bonk list 
+     */
+    if (state.userIdsArray.includes(member.id)) return;
 
     uve.send({
         embeds: [
@@ -269,9 +313,12 @@ client.on(Events.GuildMemberRemove, async (member) => {
     } = member;
 
     try {
-        // Fetch the audit logs to check for kicks
+        /**
+         * Fetch the audit logs to check for kicks
+         * and kick audit logs is <20>
+         */
         const auditLogs = await guild.fetchAuditLogs({
-            type: 20, // 20 is the audit log type for kicks
+            type: 20,
             limit: 1
         });
 
@@ -329,62 +376,52 @@ client.on(Events.InteractionCreate, async (interaction) => {
         switch (cmd) {
             case 'kickleaderboard':
             case 'clickleaderboard': {
-                try {
-                    const isKick = cmd === 'kickleaderboard';
-                    const statModel = isKick ? UserStats : ClickStats;
-                    const statType = isKick ? 'kicks' : 'clicks';
+                const isKick = cmd === 'kickleaderboard';
+                const statModel = isKick ? UserStats : ClickStats;
+                const statType = isKick ? 'kicks' : 'clicks';
 
-                    const topStats = await statModel.find({})
-                        .sort({
-                            [statType]: -1
-                        })
-                        .limit(10);
-
-                    if (!topStats.length) {
-                        return interaction.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                .setDescription(`No data available for the ${isKick ? 'kick' : 'click'} leaderboard.`)
-                                .setColor('Purple')
-                            ],
-                            flags: MessageFlags.Ephemeral,
-                        });
-                    }
-
-                    const rankIcons = ['🥇', '🥈', '🥉'];
-                    const leaderboard = topStats.map((user, index) => {
-                        const rank = rankIcons[index] || `**${index + 1}.**`;
-                        return `${rank} <@${user.userId}> — **${statType.charAt(0).toUpperCase() + statType.slice(1)}:** ${user[statType]}`;
-                    }).join('\n');
-
-                    const totalActions = topStats.reduce((sum, user) => sum + user[statType], 0);
-
-                    await interaction.reply({
+                const topStats = await statModel.find({}).sort({
+                    [statType]: -1
+                }).limit(10);
+                if (!topStats.length) {
+                    return interaction.reply({
                         embeds: [
                             new EmbedBuilder()
-                            .setTitle(`🏆 ${isKick ? 'Kick' : 'Click'} Leaderboard`)
-                            .setColor(isKick ? 'Red' : 'Blue')
-                            .setDescription(leaderboard)
-                            .addFields({
-                                name: `Total ${statType.charAt(0).toUpperCase() + statType.slice(1)}s`,
-                                value: `${totalActions}`,
-                                inline: true,
-                            })
-                            .setFooter({
-                                text: `${isKick ? 'Kick' : 'Click'} Leaderboard updated • ${new Date().toLocaleString()}`,
-                                iconURL: interaction.guild.iconURL(),
-                            })
-                        ]
-                    })
-                } catch (error) {
-                    console.error(`Error fetching ${cmd} leaderboard:`, error);
-                    await interaction.reply({
-                        content: `An error occurred while fetching the ${cmd === 'kickleaderboard' ? 'kick' : 'click'} leaderboard.`,
-                        flags: MessageFlags.Ephemeral,
+                            .setDescription(`No data available for the ${isKick ? 'kick' : 'click'} leaderboard.`)
+                            .setColor('Purple')
+                        ],
+                        ephemeral: true,
                     });
                 }
+
+                const rankIcons = ['🥇', '🥈', '🥉'];
+                const leaderboard = topStats.map((user, index) => {
+                    const rank = rankIcons[index] || `**${index + 1}.**`;
+                    return `${rank} <@${user.userId}> — **${statType.charAt(0).toUpperCase() + statType.slice(1)}:** ${user[statType]}`;
+                }).join('\n');
+
+                const totalActions = topStats.reduce((sum, user) => sum + user[statType], 0);
+
+                await interaction.reply({
+                    embeds: [
+                        new EmbedBuilder()
+                        .setTitle(`🏆 ${isKick ? 'Kick' : 'Click'} Leaderboard`)
+                        .setColor(isKick ? 'Red' : 'Blue')
+                        .setDescription(leaderboard)
+                        .addFields({
+                            name: `Total ${statType.charAt(0).toUpperCase() + statType.slice(1)}s`,
+                            value: `${totalActions}`,
+                            inline: true,
+                        })
+                        .setFooter({
+                            text: `${isKick ? 'Kick' : 'Click'} Leaderboard updated • ${new Date().toLocaleString()}`,
+                            iconURL: interaction.guild.iconURL(),
+                        })
+                    ]
+                });
                 break;
             }
+
             case 'clearmsgs': {
                 const user = options.getUser('user');
                 const amount = options.getInteger('amount');
@@ -436,6 +473,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 }
                 break;
             }
+
             case 'addrole':
             case 'removerole': {
                 const roleUser = options.getUser('user');
@@ -458,6 +496,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                         embeds: [
                             new EmbedBuilder()
                             .setDescription(`I cannot manage the role ${role.name} because it is higher than or equal to my highest role.`)
+                            .setColor('Purple')
                         ],
                         flags: MessageFlags.Ephemeral
                     });
@@ -468,22 +507,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     const hasRole = member.roles.cache.has(role.id);
                     const actionVerb = cmd === 'addrole' ? 'added' : 'removed';
 
-                    if (action === 'add' && hasRole) {
+                    if ((action === 'add' && hasRole) || (action === 'remove' && !hasRole)) {
                         return interaction.reply({
                             embeds: [
                                 new EmbedBuilder()
-                                .setDescription(`The user ${roleUser.username} already has the role ${role.name}.`)
-                                .setColor('Purple')
-                            ],
-                            flags: MessageFlags.Ephemeral
-                        });
-                    }
-
-                    if (action === 'remove' && !hasRole) {
-                        return interaction.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                .setDescription(`The user ${roleUser.username} does not have the role ${role.name}.`, )
+                                .setDescription(`The user ${roleUser.username} ${hasRole ? 'already has' : 'does not have'} the role ${role.name}.`)
                                 .setColor('Purple')
                             ],
                             flags: MessageFlags.Ephemeral
@@ -503,13 +531,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 } catch (error) {
                     console.error(`Error managing role for ${roleUser.username}:`, error);
 
-                    interaction.reply({
+                    await interaction.reply({
                         content: `An error occurred while trying to ${cmd === 'addrole' ? 'assign' : 'remove'} the role ${role.name}. Please ensure I have the necessary permissions and try again.`,
                         flags: MessageFlags.Ephemeral
                     });
                 }
-                break;
+                break
             }
+
             case 'gkick':
             case 'gban': {
                 const users = options.getString("users");
@@ -636,11 +665,95 @@ client.on(Events.InteractionCreate, async (interaction) => {
                         }
                     });
                 }
+                break;
             }
-            break;
+
+            case "bonk": {
+                const action = options.getString('action');
+                const user = options.getUser('user');
+
+                if (!action || !user) {
+                    return interaction.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                            .setDescription('Please provide both the action (`add` or `remove`) and the user.')
+                            .setColor('Purple')
+                        ],
+                        flags: MessageFlags.Ephemeral,
+                    });
+                }
+                const userId = user.id;
+
+                /**
+                 * let's add the users to bonk list with a command instead of doing .env FINALLY
+                 */
+                try {
+                    if (action === 'add') {
+                        const uveUsers = await UserIds.findOne({
+                            userId
+                        });
+                        if (uveUsers) {
+                            return interaction.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                    .setDescription(`User ${user.username} is already in the "bonk" list.`)
+                                    .setColor('Purple')
+                                ],
+                                flags: MessageFlags.Ephemeral,
+                            });
+                        }
+
+                        await UserIds.create({
+                            userId
+                        });
+                        return interaction.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                .setDescription(`User ${user.username} has been successfully added to the "bonk" list.`)
+                                .setColor('Purple')
+                            ],
+                            flags: MessageFlags.Ephemeral,
+                        });
+                    } else if (action === 'remove') {
+                        const result = await UserIds.deleteOne({
+                            userId
+                        });
+                        if (result.deletedCount === 0) {
+                            return interaction.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                    .setDescription(`User ${user.username} was not found in the "bonk" list.`)
+                                    .setColor('Purple')
+                                ],
+                                flags: MessageFlags.Ephemeral,
+                            });
+                        }
+
+                        return interaction.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                .setDescription(`User ${user.username} has been successfully removed from the "bonk" list.`)
+                                .setColor('Purple')
+                            ],
+                            flags: MessageFlags.Ephemeral,
+                        });
+                    }
+                } catch (error) {
+                    console.error('An error occurred:', error);
+                    return interaction.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                            .setDescription('An error occurred while managing the "bonk" list. Please try again later.')
+                            .setColor('Purple')
+                        ],
+                        flags: MessageFlags.Ephemeral,
+                    });
+                }
+                break;
+            }
         }
     } else {
-        for (const targetUserId of userIdsArray) {
+        for (const targetUserId of state.userIdsArray) {
             if (interaction.customId !== `kick_button_${targetUserId}`) continue;
 
             const {
@@ -648,7 +761,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 username
             } = interaction.user;
 
-            // Check if the user is trying to kick themselves
+            /**
+             * snow keeps trying to kick himself
+             */
             if (userId === targetUserId) {
                 return interaction.reply({
                     content: "You can't bonk yourself!",
@@ -656,12 +771,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 });
             }
 
-            if (userIdsArray.includes(userId)) {
+            /**
+             * mac kept kicking snow.
+             */
+            if (state.userIdsArray.includes(userId)) {
                 return interaction.reply({
                     content: "You are not allowed to use this button!",
                     flags: MessageFlags.Ephemeral,
                 });
             }
+
             const tMember = interaction.guild.members.cache.get(targetUserId);
             if (!tMember) {
                 return interaction.reply({
