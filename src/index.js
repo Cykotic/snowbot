@@ -186,8 +186,14 @@ const rest = new REST({
 client.once(Events.ClientReady, async () => {
     try {
 
-        const updateActivity = () => {
-            const status = `Managing ${state.userIdsArray.length} bonk users`;
+        /**
+         * stupid ass bug wouldn't check if the db was empty or properly update itself.
+         * so a fix was made to check if the db has a user we added, if not it checks for 0
+         */
+        const updateActivity = async () => {
+            state.userIdsArray = (await UserIds.find({}, 'userId')).map(user => user.userId);
+            const userCount = state.userIdsArray.length;
+            const status = userCount === 0 ? 'No bonk users to manage' : `Managing ${userCount} bonk users`;
             client.user.setPresence({
                 activities: [{
                     name: status,
@@ -196,18 +202,14 @@ client.once(Events.ClientReady, async () => {
                 status: 'dnd',
             });
         };
-
         /**
-         * get the store users from our db
-         */
-        state.userIdsArray = (await UserIds.find({}, 'userId')).map(user => user.userId);
-
-        /**
-         *  activity update and setting for interval 
+         * activity update and setting for interval 
          * hopfully this doesn't conflict with anything
          */
         updateActivity();
-        setInterval(updateActivity, 10000);
+        setInterval(() => {
+            updateActivity();
+        }, 10000); // update every 10 secs
 
         /**
          * send every 30 mins
@@ -237,6 +239,9 @@ client.once(Events.ClientReady, async () => {
                     .setDescription(`Press the button to bonk ${username}`)
                     .setColor('Purple');
 
+                /**
+                * this will send/update itself
+                */
                 const userState = state.uveUpdate[state.userIdsArray[index]];
                 if (userState) {
                     await userState.edit({
@@ -378,7 +383,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             case 'clickleaderboard': {
                 const isKick = cmd === 'kickleaderboard';
                 const statModel = isKick ? UserStats : ClickStats;
-                const statType = isKick ? 'kicks' : 'clicks';
+                const statType = isKick ? 'kick' : 'click';
 
                 const topStats = await statModel.find({}).sort({
                     [statType]: -1
@@ -671,7 +676,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             case "bonk": {
                 const action = options.getString('action');
                 const user = options.getUser('user');
-
+            
                 if (!action || !user) {
                     return interaction.reply({
                         embeds: [
@@ -682,17 +687,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
                         flags: MessageFlags.Ephemeral,
                     });
                 }
+            
                 const userId = user.id;
-
-                /**
-                 * let's add the users to bonk list with a command instead of doing .env FINALLY
-                 */
+            
                 try {
                     if (action === 'add') {
-                        const uveUsers = await UserIds.findOne({
-                            userId
-                        });
-                        if (uveUsers) {
+                        const existingUser = await UserIds.findOne({ userId });
+                        if (existingUser) {
                             return interaction.reply({
                                 embeds: [
                                     new EmbedBuilder()
@@ -702,10 +703,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
                                 flags: MessageFlags.Ephemeral,
                             });
                         }
-
-                        await UserIds.create({
-                            userId
-                        });
+            
+                        await UserIds.create({ userId });
+                        state.userIdsArray.push(userId); // Update the state array with the new user
+            
                         return interaction.reply({
                             embeds: [
                                 new EmbedBuilder()
@@ -715,9 +716,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                             flags: MessageFlags.Ephemeral,
                         });
                     } else if (action === 'remove') {
-                        const result = await UserIds.deleteOne({
-                            userId
-                        });
+                        const result = await UserIds.deleteOne({ userId });
                         if (result.deletedCount === 0) {
                             return interaction.reply({
                                 embeds: [
@@ -728,7 +727,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
                                 flags: MessageFlags.Ephemeral,
                             });
                         }
-
+                        
+                        state.userIdsArray = state.userIdsArray.filter(id => id !== userId); // Remove the user from the state array
+            
                         return interaction.reply({
                             embeds: [
                                 new EmbedBuilder()
@@ -750,7 +751,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     });
                 }
                 break;
-            }
+            }            
         }
     } else {
         for (const targetUserId of state.userIdsArray) {
