@@ -186,20 +186,21 @@ const rest = new REST({
 client.once(Events.ClientReady, async () => {
     try {
         const updateActivity = async () => {
-            state.userIdsArray = (await UserIds.find({}, 'userId')).map(user => user.userId);
-            const userCount = state.userIdsArray.length;
-            const status = userCount === 0 ? 'No bonk users to manage' : `Managing ${userCount} bonk users`;
+            const userIds = await UserIds.find({}, 'userId');
+            state.userIdsArray = userIds.map(user => user.userId);
+            const status = state.userIdsArray.length === 0 ? 'No bonk users' : `${state.userIdsArray.length} bonk users`;
+
             client.user.setPresence({
                 activities: [{
                     name: status,
-                    type: ActivityType.Watching
+                    type: ActivityType.Watching,
                 }],
                 status: 'dnd',
             });
         };
 
         await updateActivity();
-        setInterval(updateActivity, 10000); // Update every 10 secs
+        setInterval(updateActivity, 10000);
 
         cron.schedule('* * * * *', async () => {
             if (state.buttonPressed) return;
@@ -210,39 +211,42 @@ client.once(Events.ClientReady, async () => {
             const members = await Promise.all(
                 state.userIdsArray.map(userId => guild.members.fetch(userId).catch(() => null))
             );
+            await Promise.all(
+                members.map(async (member, index) => {
+                    if (!member) return;
 
-            await Promise.all(members.map(async (member, index) => {
-                if (!member) return;
+                    const userId = state.userIdsArray[index];
+                    const username = member.user.username;
 
-                const username = member.user.username;
-                const row = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder()
-                    .setCustomId(`kick_button_${state.userIdsArray[index]}`)
-                    .setLabel(`Bonk ${username}`)
-                    .setStyle(ButtonStyle.Danger)
-                );
+                    const row = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder()
+                        .setCustomId(`bonk_button_${userId}`)
+                        .setLabel(`Bonk ${username}`)
+                        .setStyle(ButtonStyle.Danger)
+                    );
 
-                const embed = new EmbedBuilder()
-                    .setDescription(`Press the button to bonk ${username}`)
-                    .setColor('Purple');
+                    const embed = new EmbedBuilder()
+                        .setDescription(`Press the button to bonk ${username}`)
+                        .setColor('Purple');
 
-                const userState = state.uveUpdate[state.userIdsArray[index]];
-                if (userState) {
-                    await userState.edit({
-                        embeds: [embed],
-                        components: [row]
-                    });
-                } else {
-                    state.uveUpdate[state.userIdsArray[index]] = await uveChannel.send({
-                        embeds: [embed],
-                        components: [row]
-                    });
-                }
-            }));
+                    // Either update an existing message or send a new one
+                    const message = state.uveUpdate[userId];
+                    if (message) {
+                        await message.edit({
+                            embeds: [embed],
+                            components: [row]
+                        });
+                    } else {
+                        state.uveUpdate[userId] = await uveChannel.send({
+                            embeds: [embed],
+                            components: [row],
+                        });
+                    }
+                })
+            );
         });
-
     } catch (error) {
-        console.error('An error occurred:', error);
+        console.error('An error occurred in clientReady:', error);
     }
 });
 
@@ -268,7 +272,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
     }
 
     /**
-     * so we don't spam the webhook. when people are getting kicked from bonk list 
+     * so we don't spam the webhook. when people are joinning back from getting kicked from bonk list 
      */
     if (state.userIdsArray.includes(member.id)) return;
     uve.send({
@@ -279,22 +283,6 @@ client.on(Events.GuildMemberAdd, async (member) => {
         ]
     })
 });
-
-client.on(Events.GuildMemberRemove, async (member) => {
-
-    /**
-     * so we don't spam the webhook. when people are getting kicked from bonk list 
-     */
-    if (state.userIdsArray.includes(member.id)) return;
-
-    uve.send({
-        embeds: [
-            new EmbedBuilder()
-            .setDescription(`${member.user.username} has left the server.`)
-            .setColor('Purple')
-        ]
-    })
-})
 
 client.on(Events.GuildMemberRemove, async (member) => {
     const {
@@ -326,6 +314,19 @@ client.on(Events.GuildMemberRemove, async (member) => {
                 upsert: true,
                 new: true
             });
+
+            /**
+             * so we don't spam the webhook. when people are getting kicked from bonk list 
+             */
+            if (state.userIdsArray.includes(member.id)) return;
+
+            uve.send({
+                embeds: [
+                    new EmbedBuilder()
+                    .setDescription(`${member.user.username} has left the server.`)
+                    .setColor('Purple')
+                ]
+            })
 
             /**
              * unfortunately, can't use this code because for some reason dms are still turned off makes no sense.
@@ -365,7 +366,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             case 'clickleaderboard': {
                 const isKick = cmd === 'kickleaderboard';
                 const statModel = isKick ? UserStats : ClickStats;
-                const statType = isKick ? 'kick' : 'click';
+                const statType = isKick ? 'kicks' : 'clicks';
                 const topStats = await statModel.find({}).sort({
                     [statType]: -1
                 }).limit(10);
@@ -629,7 +630,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 }
                 break;
             }
-
             case "bonk": {
                 const action = options.getString('action');
                 const user = options.getUser('user');
@@ -640,7 +640,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                             .setDescription('Please provide both the action (`add` or `remove`) and the user.')
                             .setColor('Purple')
                         ],
-                        flags: MessageFlags.Ephemeral,
+                        ephemeral: true,
                     });
                 }
 
@@ -648,126 +648,162 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                 switch (action) {
                     case 'add': {
-                        const existingUser = await UserIds.findOne({
-                            userId
-                        });
-                        if (existingUser) {
+                        try {
+                            const existingUser = await UserIds.findOne({
+                                userId
+                            });
+                            if (existingUser) {
+                                return interaction.reply({
+                                    embeds: [new EmbedBuilder()
+                                        .setDescription(`User ${user.username} is already in the "bonk" list.`)
+                                        .setColor('Purple')
+                                    ],
+                                    ephemeral: true,
+                                });
+                            }
+
+                            await UserIds.create({
+                                userId
+                            });
+                            state.userIdsArray.push(userId);
+
                             return interaction.reply({
                                 embeds: [new EmbedBuilder()
-                                    .setDescription(`User ${user.username} is already in the "bonk" list.`)
+                                    .setDescription(`User ${user.username} has been successfully added to the "bonk" list.`)
                                     .setColor('Purple')
                                 ],
-                                flags: MessageFlags.Ephemeral,
+                                ephemeral: true,
+                            });
+                        } catch (error) {
+                            console.error(`Error adding user to bonk list: ${error}`);
+                            return interaction.reply({
+                                embeds: [new EmbedBuilder()
+                                    .setDescription('An error occurred while adding the user to the bonk list.')
+                                    .setColor('Red')
+                                ],
+                                ephemeral: true,
                             });
                         }
-
-                        await UserIds.create({
-                            userId
-                        });
-                        state.userIdsArray.push(userId); // Update the state array with the new user
-
-                        return interaction.reply({
-                            embeds: [new EmbedBuilder()
-                                .setDescription(`User ${user.username} has been successfully added to the "bonk" list.`)
-                                .setColor('Purple')
-                            ],
-                            flags: MessageFlags.Ephemeral,
-                        });
                     }
                     case 'remove': {
-                        const result = await UserIds.deleteOne({
-                            userId
-                        });
-                        if (result.deletedCount === 0) {
+                        try {
+                            const result = await UserIds.deleteOne({
+                                userId
+                            });
+                            if (result.deletedCount === 0) {
+                                return interaction.reply({
+                                    embeds: [new EmbedBuilder()
+                                        .setDescription(`User ${user.username} was not found in the "bonk" list.`)
+                                        .setColor('Purple')
+                                    ],
+                                    ephemeral: true,
+                                });
+                            }
+
+                            state.userIdsArray = state.userIdsArray.filter(id => id !== userId);
+
                             return interaction.reply({
                                 embeds: [new EmbedBuilder()
-                                    .setDescription(`User ${user.username} was not found in the "bonk" list.`)
+                                    .setDescription(`User ${user.username} has been successfully removed from the "bonk" list.`)
                                     .setColor('Purple')
                                 ],
-                                flags: MessageFlags.Ephemeral,
+                                ephemeral: true,
+                            });
+                        } catch (error) {
+                            console.error(`Error removing user from bonk list: ${error}`);
+                            return interaction.reply({
+                                embeds: [new EmbedBuilder()
+                                    .setDescription('An error occurred while removing the user from the bonk list.')
+                                    .setColor('Red')
+                                ],
+                                ephemeral: true,
                             });
                         }
-
-                        state.userIdsArray = state.userIdsArray.filter(id => id !== userId); // Remove the user from the state array
-
-                        return interaction.reply({
-                            embeds: [new EmbedBuilder()
-                                .setDescription(`User ${user.username} has been successfully removed from the "bonk" list.`)
-                                .setColor('Purple')
-                            ],
-                            flags: MessageFlags.Ephemeral,
-                        });
                     }
-                    default:
-                        await interaction.reply({
-                            embeds: [new EmbedBuilder()
-                                .setDescription('Invalid action. Please use `add` or `remove`.')
-                                .setColor('Purple')
-                            ],
-                            flags: MessageFlags.Ephemeral,
-                        });
                 }
-                break;
             }
+            break;
         }
     } else if (interaction.isButton()) {
-        const targetUserId = interaction.customId.split('_')[2]; // Extract target user ID from custom ID
-        const userId = interaction.user.id;
-        const username = interaction.user.username;
+        try {
+            const [, , targetUserId] = interaction.customId.split('_');
 
-        if (userId === targetUserId) {
-            return interaction.reply({
-                content: "You can't bonk yourself!",
-                ephemeral: true
-            });
-        }
+            const {
+                id: userId,
+                username
+            } = interaction.user;
 
-        if (!state.userIdsArray.includes(targetUserId)) {
-            return interaction.reply({
-                content: "You are not allowed to use this button!",
-                ephemeral: true
-            });
-        }
-
-        await uve.send({
-            embeds: [
-                new EmbedBuilder()
-                .setDescription(`Button clicked by user: ${username} (ID: ${userId})`)
-                .setColor('Purple'),
-            ],
-        })
-
-        const tMember = await interaction.guild.members.fetch(targetUserId).catch(() => null);
-        if (!tMember) {
-            return interaction.reply({
-                content: "The user is not in the guild.",
-                ephemeral: true
-            });
-        }
-
-        await ClickStats.findOneAndUpdate({
-            userId
-        }, {
-            $inc: {
-                clicks: 1
+            /**
+             * Prevent self-bonking
+             */
+            if (userId === targetUserId) {
+                return interaction.reply({
+                    content: "You can't bonk yourself!",
+                    flags: MessageFlags.Ephemeral,
+                });
             }
-        }, {
-            upsert: true,
-            new: true
-        });
 
-        await interaction.guild.members.kick(targetUserId, `Kicked by ${username} HEHE`);
+            /**
+             * Prevent bonk users from press the button.
+             */
+            if (!state.userIdsArray.includes(targetUserId)) {
+                return interaction.reply({
+                    content: "You are not allowed to use this button!",
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
 
-        const sEmbed = new EmbedBuilder()
-            .setDescription(`${tMember.user.username} has been kicked.`)
-            .setColor('Purple');
+            /**
+             * Mah Webhook
+             */
+            await uve.send({
+                embeds: [
+                    new EmbedBuilder()
+                    .setDescription(`Button clicked by user: ${username} (ID: ${userId})`)
+                    .setColor('Purple'),
+                ],
+            })
 
-        await interaction.update({
-            embeds: [sEmbed],
-            components: []
-        });
+            /**
+             * check if the user is even in the guild
+             */
+            const tMember = await interaction.guild.members.fetch(targetUserId).catch(() => null);
+            if (!tMember) {
+                return interaction.reply({
+                    content: "The user is not in the guild.",
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+
+            await ClickStats.findOneAndUpdate({
+                userId
+            }, {
+                $inc: {
+                    clicks: 1
+                }
+            }, {
+                upsert: true,
+                new: true
+            });
+
+
+            /**
+             * shows in the auditLogs on 'Kicked By <>'
+             * shows an empty button till it get's updated again when the user joins back
+             */
+            await interaction.guild.members.kick(targetUserId, `Kicked by ${username}`);
+            return interaction.update({
+                embeds: [
+                    new EmbedBuilder()
+                    .setDescription(`${tMember.user.username} has been bonked`)
+                    .setColor('Purple')
+                ],
+                components: [],
+            })
+        } catch (error) {
+            console.error("Error processing button interaction:", error);
+        }
     }
 });
-
 
 client.login(TOKEN);
