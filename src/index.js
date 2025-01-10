@@ -202,7 +202,7 @@ client.once(Events.ClientReady, async () => {
         await updateActivity();
         setInterval(updateActivity, 10000);
 
-        cron.schedule('* * * * *', async () => {
+        cron.schedule('*/10 * * * *', async () => {
             if (state.buttonPressed) return;
 
             const guild = client.guilds.cache.first();
@@ -229,7 +229,6 @@ client.once(Events.ClientReady, async () => {
                         .setDescription(`Press the button to bonk ${username}`)
                         .setColor('Purple');
 
-                    // Either update an existing message or send a new one
                     const message = state.uveUpdate[userId];
                     if (message) {
                         await message.edit({
@@ -251,37 +250,33 @@ client.once(Events.ClientReady, async () => {
 });
 
 client.on(Events.GuildMemberAdd, async (member) => {
-    const userRoleMap = {
-        "487060202621894657": "1210482229340274689", // "SNOW" : 'HEADMOD
-        "1108162232774299729": "1308540258778091650" // "DUMBASS (mac's dumbass)" : "SERVER RETARD"
-        /**
-         * don't need to add anymore unless it's "SERVER RETARD"
-         */
+    const roles = {
+        "487060202621894657": ["1210482229340274689", "234567890123456789"], // "SNOW": ['HEADMOD', 'PIC PERMS']
+        "1108162232774299729": ["1308540258778091650"] // "DUMBASS (mac's dumbass)" : ["SERVER RETARD"]
     };
 
-    const roleId = userRoleMap[member.id];
-    if (roleId) {
-        const role = member.guild.roles.cache.get(roleId);
+    const userId = member.id;
 
-        try {
-            // Assign the role based on the role map
-            await member.roles.add(role);
-        } catch (error) {
-            console.error('Failed to assign role:', error);
-        }
+    if (roles[userId]) {
+        const roleIds = roles[userId];
+        await Promise.all(roleIds.map(async (roleId) => {
+            const role = member.guild.roles.cache.get(roleId);
+            if (role) {
+                await member.roles.add(role);
+            }
+        }));
     }
 
-    /**
-     * so we don't spam the webhook. when people are joinning back from getting kicked from bonk list 
-     */
+    // Prevent spamming the webhook when users join back after getting kicked from the bonk list
     if (state.userIdsArray.includes(member.id)) return;
+
     uve.send({
         embeds: [
             new EmbedBuilder()
             .setDescription(`${member.user.username} has joined the server.`)
             .setColor('Purple')
         ]
-    })
+    });
 });
 
 client.on(Events.GuildMemberRemove, async (member) => {
@@ -393,7 +388,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                         .setColor(isKick ? 'Red' : 'Blue')
                         .setDescription(leaderboard)
                         .addFields({
-                            name: `Total ${statType.charAt(0).toUpperCase() + statType.slice(1)}s`,
+                            name: `Total ${statType.charAt(0).toUpperCase() + statType.slice(1)}`,
                             value: `${totalActions}`,
                             inline: true,
                         })
