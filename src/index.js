@@ -185,9 +185,6 @@ const rest = new REST({
 
 client.once(Events.ClientReady, async () => {
     try {
-        /**
-         * our status, checking how many users we have in the db
-         */
         const updateActivity = async () => {
             const userIds = await UserIds.find({}, 'userId');
             state.userIdsArray = userIds.map(user => user.userId);
@@ -205,17 +202,6 @@ client.once(Events.ClientReady, async () => {
         await updateActivity();
         setInterval(updateActivity, 10000);
 
-        /**
-         * checking every 10 mins
-         * could be incresed to any number
-         * 
-         * - The first field (*) represents minutes and means every minute.
-         * - The second field (*) represents hours and means every hour.
-         * - The third field (*) represents day of the month and means every day.
-         * - The fourth field (*) represents months and means every month.
-         * - The fifth field (*) represents day of the week and means every day of the week.
-         * 
-         */
         cron.schedule('*/10 * * * *', async () => {
             if (state.buttonPressed) return;
 
@@ -243,9 +229,6 @@ client.once(Events.ClientReady, async () => {
                         .setDescription(`Press the button to bonk ${username}`)
                         .setColor('Purple');
 
-                    /**
-                     * send the msg the first time and then edits it so we don't have to keep spamming the same one
-                     */
                     const message = state.uveUpdate[userId];
                     if (message) {
                         await message.edit({
@@ -267,11 +250,8 @@ client.once(Events.ClientReady, async () => {
 });
 
 client.on(Events.GuildMemberAdd, async (member) => {
-    /**
-     * snow requested for 2 roles, so added [] and then promise.all to always give him those 2 roles
-     */
     const roles = {
-        "487060202621894657": ["1210482229340274689", "234567890123456789"], // "SNOW": ['HEADMOD', 'PIC PERMS']
+        "487060202621894657": ["1210482229340274689", "1183166411313532988"], // "SNOW": ['HEADMOD', 'PIC PERMS']
         "1108162232774299729": ["1308540258778091650"] // "DUMBASS (mac's dumbass)" : ["SERVER RETARD"]
     };
 
@@ -287,9 +267,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
         }));
     }
 
-    /**
-     * Prevent spamming the webhook when users join back after getting kicked from the bonk list (if they join back)
-     */
+    // Prevent spamming the webhook when users join back after getting kicked from the bonk list
     if (state.userIdsArray.includes(member.id)) return;
 
     uve.send({
@@ -347,7 +325,6 @@ client.on(Events.GuildMemberRemove, async (member) => {
 
             /**
              * unfortunately, can't use this code because for some reason dms are still turned off makes no sense.
-             * i'll keep this in here if anyone wants it
              */
 
             // we create the invite for snow, beause this mf keeps getting kicked HEHE
@@ -380,15 +357,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         } = interaction;
 
         switch (cmd) {
-            /**
-             * 'kickleaderboard' and 'clickleaderboard' a commands.
-             * Depending on the command, it fetches the top 10 users for kicks or clicks,
-             * sorts them in descending order, and generates a leaderboard.
-             *
-             * @param {string} cmd - The command name, either 'kickleaderboard' or 'clickleaderboard'.
-             * @param {object} interaction - The interaction object containing context and methods for replying.
-             * @returns {Promise<void>} - A promise that resolves when the reply is sent.
-             */
             case 'kickleaderboard':
             case 'clickleaderboard': {
                 const isKick = cmd === 'kickleaderboard';
@@ -432,14 +400,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 });
                 break;
             }
-            /**
-             * 'clearmsgs' a command to delete a specified number of messages
-             * from a particular user within a channel.
-             *
-             * @param {object} options - The options provided by the interaction.
-             * @param {object} interaction - The interaction object containing context and methods for replying.
-             * @returns {Promise<void>} - A promise that resolves when the reply is sent.
-             */
             case 'clearmsgs': {
                 const user = options.getUser('user');
                 const amount = options.getInteger('amount');
@@ -486,15 +446,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 }
                 break;
             }
-            /**
-             * 'addrole' and 'removerole' a commands to manage user roles within a server.
-             * Depending on the command, it either adds or removes a specified role from a user.
-             *
-             * @param {string} cmd - The command name, either 'addrole' or 'removerole'.
-             * @param {object} options - The options provided by the interaction.
-             * @param {object} interaction - The interaction object containing context and methods for replying.
-             * @returns {Promise<void>} - A promise that resolves when the reply is sent.
-             */
             case 'addrole':
             case 'removerole': {
                 const roleUser = options.getUser('user');
@@ -552,15 +503,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 }
                 break
             }
-            /**
-             * 'gkick' and 'gban' a commands to perform global or selective
-             * user kicks or bans across multiple guilds.
-             *
-             * @param {string} cmd - The command name, either 'gkick' or 'gban'.
-             * @param {object} options - The options provided by the interaction.
-             * @param {object} interaction - The interaction object containing context and methods for replying.
-             * @returns {Promise<void>} - A promise that resolves when the reply is sent.
-             */
+
             case 'gkick':
             case 'gban': {
                 const users = options.getString("users");
@@ -568,16 +511,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const userIds = users.split(',').map(id => id.trim().replace(/[<@!>]/g, ""));
                 const action = cmd === 'gkick' ? 'kick' : 'ban';
                 const actionVerb = cmd === 'gkick' ? 'kicked' : 'banned';
-
-                /**
-                 * Performs the specified action (kick/ban) on a user in a guild.
-                 *
-                 * @param {object} guild - The guild where the action is performed.
-                 * @param {string} userId - The ID of the user to perform the action on.
-                 * @param {string} action - The action to perform, either 'kick' or 'ban'.
-                 * @param {string} actionVerb - The past tense of the action, for messaging.
-                 * @returns {Promise<string>} - A message indicating the result of the action.
-                 */
                 const performAction = async (guild, userId, action, actionVerb) => {
                     try {
                         const member = await guild.members.fetch(userId).catch(() => null);
@@ -604,16 +537,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
                         return `❌ Failed to ${action} <@${userId}> from **${guild.name}** - ${error.message}`;
                     }
                 };
-
-                /**
-                 * Processes the specified action across multiple guilds for the given user IDs.
-                 *
-                 * @param {array} guilds - The list of guilds to perform the action in.
-                 * @param {array} userIds - The list of user IDs to perform the action on.
-                 * @param {string} action - The action to perform, either 'kick' or 'ban'.
-                 * @param {string} actionVerb - The past tense of the action, for messaging.
-                 * @returns {Promise<array>} - The results of the action for each user in each guild.
-                 */
                 const processActionAcrossGuilds = async (guilds, userIds, action, actionVerb) => {
                     const results = [];
                     for (const guild of guilds) {
@@ -702,16 +625,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 }
                 break;
             }
-            /**
-             * 'bonk' a command to manage the addition and removal of users
-             * to/from a "bonk" list. This list keeps track of users who have been
-             * "bonked" within the server.
-             *
-             * @param {string} cmd - The command name, should be 'bonk'.
-             * @param {object} options - The options provided by the interaction.
-             * @param {object} interaction - The interaction object containing context and methods for replying.
-             * @returns {Promise<void>} - A promise that resolves when the reply is sent.
-             */
             case "bonk": {
                 const action = options.getString('action');
                 const user = options.getUser('user');
@@ -808,10 +721,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
     } else if (interaction.isButton()) {
         try {
-            /**
-             * we listen if the button get's with _
-             * should be like bonk_button_<487060202621894657>
-             */
             const [, , targetUserId] = interaction.customId.split('_');
 
             const {
@@ -861,9 +770,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 });
             }
 
-            /**
-             * we logs our clicks through our db
-             */
             await ClickStats.findOneAndUpdate({
                 userId
             }, {
@@ -881,7 +787,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
              * shows an empty button till it get's updated again when the user joins back
              */
             await interaction.guild.members.kick(targetUserId, `Kicked by ${username}`);
-            await interaction.update({
+            return interaction.update({
                 embeds: [
                     new EmbedBuilder()
                     .setDescription(`${tMember.user.username} has been bonked`)
