@@ -358,13 +358,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         switch (cmd) {
             case 'kickleaderboard':
-            case 'clickleaderboard': {
+            case 'clickleaderboard':
                 const isKick = cmd === 'kickleaderboard';
                 const statModel = isKick ? UserStats : ClickStats;
                 const statType = isKick ? 'kicks' : 'clicks';
+
                 const topStats = await statModel.find({}).sort({
                     [statType]: -1
                 }).limit(10);
+
                 if (!topStats.length) {
                     return interaction.reply({
                         embeds: [
@@ -375,18 +377,26 @@ client.on(Events.InteractionCreate, async (interaction) => {
                         ephemeral: true,
                     });
                 }
+
                 const rankIcons = ['🥇', '🥈', '🥉'];
-                const leaderboard = topStats.map((user, index) => {
-                    const rank = rankIcons[index] || `**${index + 1}.**`;
-                    return `${rank} <@${user.userId}> — **${statType.charAt(0).toUpperCase() + statType.slice(1)}:** ${user[statType]}`;
-                }).join('\n');
+
+                const leaderboard = await Promise.all(
+                    topStats.map(async (user, index) => {
+                        const rank = rankIcons[index] || `**${index + 1}.**`;
+                        const fetchedUser = await interaction.client.users.fetch(user.userId).catch(() => null);
+                        const username = fetchedUser ? fetchedUser.username : 'Unknown User';
+                        return `${rank} **${username}** — **${statType.charAt(0).toUpperCase() + statType.slice(1)}:** ${user[statType]} (<@${user.userId}>)`;
+                    })
+                );
+
                 const totalActions = topStats.reduce((sum, user) => sum + user[statType], 0);
+
                 await interaction.reply({
                     embeds: [
                         new EmbedBuilder()
                         .setTitle(`🏆 ${isKick ? 'Kick' : 'Click'} Leaderboard`)
                         .setColor(isKick ? 'Red' : 'Blue')
-                        .setDescription(leaderboard)
+                        .setDescription(leaderboard.join('\n'))
                         .addFields({
                             name: `Total ${statType.charAt(0).toUpperCase() + statType.slice(1)}`,
                             value: `${totalActions}`,
@@ -399,7 +409,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     ]
                 });
                 break;
-            }
             case 'clearmsgs': {
                 const user = options.getUser('user');
                 const amount = options.getInteger('amount');
