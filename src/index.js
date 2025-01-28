@@ -251,8 +251,9 @@ client.once(Events.ClientReady, async () => {
 
 client.on(Events.GuildMemberAdd, async (member) => {
     const roles = {
-        "487060202621894657": ["1210482229340274689", "1183166411313532988"], // "SNOW": ['HEADMOD', 'PIC PERMS']
-        "1108162232774299729": ["1308540258778091650"] // "DUMBASS (mac's dumbass)" : ["SERVER RETARD"]
+        "487060202621894657": ["1210482229340274689", "1179221612952821770", "1183166411313532988"], // "SNOW": ['HEADMOD', 'MOD' 'PIC PERMS']
+        "1108162232774299729": ["1308540258778091650"], // "DUMBASS (mac's dumbass)" : ["SERVER RETARD"]
+        "1074679638875447397": ["1248074848115228682", '1183071816332365954', '1183166411313532988'] // "Fretz": [HOMIE', 'lifetime', 'PIC PERMS']
     };
 
     const userId = member.id;
