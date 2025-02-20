@@ -250,16 +250,23 @@ client.once(Events.ClientReady, async () => {
 });
 
 client.on(Events.GuildMemberAdd, async (member) => {
-    const roles = {
-        "487060202621894657": ["1210482229340274689", "1179221612952821770", "1183166411313532988"], // "SNOW": ['HEADMOD', 'MOD' 'PIC PERMS']
-        "1108162232774299729": ["1308540258778091650"], // "DUMBASS (mac's dumbass)" : ["SERVER RETARD"]
-        "1074679638875447397": ["1248074848115228682", '1183071816332365954', '1183166411313532988'] // "Fretz": [HOMIE', 'lifetime', 'PIC PERMS']
-    };
-
+    /**
+     *
+     * new method to handles to roles added in bonk
+     * 
+     */ 
+    // const roles = {
+    //     "487060202621894657": ["1210482229340274689", "1179221612952821770", "1183166411313532988"], // "SNOW": ['HEADMOD', 'MOD' 'PIC PERMS']
+    //     "1108162232774299729": ["1308540258778091650"], // "DUMBASS (mac's dumbass)" : ["SERVER RETARD"]
+    //     "1074679638875447397": ["1248074848115228682", '1183071816332365954', '1183166411313532988'] // "Fretz": [HOMIE', 'LIFETIME', 'PIC PERMS']
+    // };
     const userId = member.id;
+    const user = await UserIds.findOne({
+        userId
+    })
 
-    if (roles[userId]) {
-        const roleIds = roles[userId];
+    if (user && user.roleIds) {
+        const roleIds = user.roleIds;
         await Promise.all(roleIds.map(async (roleId) => {
             const role = member.guild.roles.cache.get(roleId);
             if (role) {
@@ -375,7 +382,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                             .setDescription(`No data available for the ${isKick ? 'kick' : 'click'} leaderboard.`)
                             .setColor('Purple')
                         ],
-                        ephemeral: true,
+                        flags: MessageFlags.Ephemeral,
                     });
                 }
 
@@ -645,7 +652,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                             .setDescription('Please provide both the action (`add` or `remove`) and the user.')
                             .setColor('Purple')
                         ],
-                        ephemeral: true,
+                        flags: MessageFlags.Ephemeral,
                     });
                 }
 
@@ -663,21 +670,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
                                         .setDescription(`User ${user.username} is already in the "bonk" list.`)
                                         .setColor('Purple')
                                     ],
-                                    ephemeral: true,
+                                    flags: MessageFlags.Ephemeral,
                                 });
                             }
 
-                            await UserIds.create({
-                                userId
-                            });
-                            state.userIdsArray.push(userId);
+                            const member = interaction.guild.members.cache.get(userId)
+                            if (member) {
+                                const roleIds = member.roles.cache
+                                .filter(role => role.id !== '1168019933955887144' && role.id !== '1182955015795658832')  // Exclude @everyone, && member role
+                                    .map(role => role.id)
+                                await UserIds.create({
+                                    userId,
+                                    roleIds
+                                })
+                                state.userIdsArray.push(userId);
+                            }
 
                             return interaction.reply({
                                 embeds: [new EmbedBuilder()
                                     .setDescription(`User ${user.username} has been successfully added to the "bonk" list.`)
                                     .setColor('Purple')
                                 ],
-                                ephemeral: true,
+                                flags: MessageFlags.Ephemeral,
                             });
                         } catch (error) {
                             console.error(`Error adding user to bonk list: ${error}`);
@@ -686,14 +700,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
                                     .setDescription('An error occurred while adding the user to the bonk list.')
                                     .setColor('Red')
                                 ],
-                                ephemeral: true,
+                                flags: MessageFlags.Ephemeral,
                             });
                         }
                     }
                     case 'remove': {
                         try {
                             const result = await UserIds.deleteOne({
-                                userId
+                                userId,
+                                roleIds
                             });
                             if (result.deletedCount === 0) {
                                 return interaction.reply({
@@ -701,7 +716,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                                         .setDescription(`User ${user.username} was not found in the "bonk" list.`)
                                         .setColor('Purple')
                                     ],
-                                    ephemeral: true,
+                                    flags: MessageFlags.Ephemeral,
                                 });
                             }
 
@@ -712,7 +727,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                                     .setDescription(`User ${user.username} has been successfully removed from the "bonk" list.`)
                                     .setColor('Purple')
                                 ],
-                                ephemeral: true,
+                                flags: MessageFlags.Ephemeral,
                             });
                         } catch (error) {
                             console.error(`Error removing user from bonk list: ${error}`);
@@ -721,7 +736,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                                     .setDescription('An error occurred while removing the user from the bonk list.')
                                     .setColor('Red')
                                 ],
-                                ephemeral: true,
+                                flags: MessageFlags.Ephemeral,
                             });
                         }
                     }

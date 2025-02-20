@@ -1,15 +1,17 @@
 const mongoose = require('mongoose');
 require('dotenv').config();
 
-const { mongoURL } = process.env;
+const {
+    mongoURL
+} = process.env;
 
 mongoose.set('strictQuery', true);
 
 mongoose.connect(mongoURL, {
-    keepAlive: true,
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-})
+        keepAlive: true,
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+    })
     .then(() => console.log('Successfully connected to mongooseB'))
     .catch(err => console.error('MongoDB connection error:', err));
 
@@ -45,6 +47,10 @@ const userIdSchema = new mongoose.Schema({
         required: true,
         unique: true,
     },
+    roleIds: {
+        type: [String],
+        default: []
+    }, // Added roles
 });
 
 const ClickStats = mongoose.model('ClickStats', clickSchema);
