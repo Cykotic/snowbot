@@ -1,5 +1,7 @@
 # Bonk
 
+This now supports multi-guild functionality, though there are still a few bugs and quirks to iron out.
+
 The purpose of this project is to have a bit of fun with Snow (but it's been expanded to add more people) by implementing various Discord bot commands and interactions. This is a creative collection of ideas, all bundled into a single file. It's my first time making a source like this, so it might be a bit messy with everything all over the place.
 
 **Made By:** Avieah  
