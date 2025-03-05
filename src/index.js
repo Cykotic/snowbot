@@ -223,7 +223,7 @@ client.once(Events.ClientReady, async () => {
     /**
      * Periodically send bonk-related updates using cron jobs
      */
-    
+
     cron.schedule('*/10 * * * *', async () => {
         if (state.buttonPressed) return; // Avoid redundant updates
 
@@ -231,7 +231,7 @@ client.once(Events.ClientReady, async () => {
             const channelData = await Channels.findOne({
                 guildId: guild.id
             });
-            const uveChannelId = channelData ?.channelId;
+            const uveChannelId = channelData ? .channelId;
             if (!uveChannelId) return;
 
             const uveChannel = client.channels.cache.get(uveChannelId);
@@ -365,54 +365,65 @@ client.on(Events.InteractionCreate, async (interaction) => {
         switch (cmd) {
             case 'bonkchannel': {
                 const action = options.getSubcommand();
+                const guildId = interaction.guildId;
 
-                if (action === 'set') {
-                    const channel = options.getChannel('channel');
+                try {
+                    if (action === 'set') {
+                        const channel = options.getChannel('channel');
 
-                    if (!channel || channel.type !== ChannelType.GuildText) {
+                        if (!channel || channel.type !== ChannelType.GuildText) {
+                            return interaction.reply({
+                                content: 'Please specify a valid text channel.',
+                                flags: MessageFlags.Ephemeral,
+                            });
+                        }
+
+                        await Channels.findOneAndUpdate({
+                            guildId
+                        }, {
+                            guildId,
+                            channelId: channel.id
+                        }, {
+                            upsert: true,
+                            new: true
+                        });
+
                         return interaction.reply({
-                            content: 'Please specify a valid text channel.',
+                            content: `Bonk updates will now be sent to <#${channel.id}>.`,
                             flags: MessageFlags.Ephemeral,
                         });
                     }
 
-                    await Channels.findOneAndUpdate({
-                        guildId: interaction.guildId
-                    }, {
-                        guildId: interaction.guildId,
-                        channelId: channel.id
-                    }, {
-                        upsert: true,
-                        new: true
-                    });
+                    if (action === 'remove') {
+                        const existingChannel = await Channels.findOne({
+                            guildId
+                        });
 
-                    return interaction.reply({
-                        content: `Bonk users will now be sent to ${channel}.`,
-                        flags: MessageFlags.Ephemeral,
-                    });
-                } else if (action === 'remove') {
-                    const existingChannel = await Channels.findOne({
-                        guildId: interaction.guildId
-                    });
+                        if (!existingChannel ? .channelId) {
+                            return interaction.reply({
+                                content: 'There is no bonk channel set to remove.',
+                                flags: MessageFlags.Ephemeral,
+                            });
+                        }
 
-                    if (!existingChannel || !existingChannel.channelId) {
+                        await Channels.deleteOne({
+                            guildId
+                        });
+
                         return interaction.reply({
-                            content: 'There is no bonk channel set to remove.',
+                            content: 'The bonk channel has been successfully removed.',
                             flags: MessageFlags.Ephemeral,
                         });
                     }
 
-                    await Channels.deleteOne({
-                        guildId: interaction.guildId
-                    });
-
-                    return interaction.reply({
-                        content: 'The bonk channel has been removed successfully.',
-                        flags: MessageFlags.Ephemeral,
-                    });
-                } else {
                     return interaction.reply({
                         content: 'Invalid action. Please use "set" or "remove."',
+                        flags: MessageFlags.Ephemeral,
+                    });
+                } catch (error) {
+                    console.error(`Error in bonkchannel command: ${error.message}`);
+                    return interaction.reply({
+                        content: 'An error occurred while processing your request. Please try again later.',
                         flags: MessageFlags.Ephemeral,
                     });
                 }
@@ -648,42 +659,56 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                 if (action === 'add') {
                     try {
+                        const member = interaction.guild.members.cache.get(userId) || await interaction.guild.members.fetch(userId).catch(() => null);
+                        if (!member) {
+                            return interaction.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                    .setDescription(`The user ${user.username} is not a member of this server and cannot be added to the "bonk" list.`)
+                                    .setColor('Purple')
+                                ],
+                                flags: MessageFlags.Ephemeral,
+                            });
+                        }
+                        /**
+                         * Check if the user already exists in the bonk list for this guild
+                         */
                         const existingUser = await UserIds.findOne({
+                            guildId,
                             userId
                         });
                         if (existingUser) {
                             return interaction.reply({
                                 embeds: [
                                     new EmbedBuilder()
-                                    .setDescription(`User ${user.username} is already in the "bonk" list.`)
+                                    .setDescription(`User ${user.username} is already in the "bonk" list for this server.`)
                                     .setColor('Purple')
                                 ],
                                 flags: MessageFlags.Ephemeral,
                             });
                         }
 
-                        const member = interaction.guild.members.cache.get(userId);
-                        if (member) {
-                            const roleIds = member.roles.cache
-                                .filter(role => role.id !== member.guild.id) // Exclude @everyone role
-                                .map(role => role.id);
+                        const roleIds = member.roles.cache
+                            .filter(role => role.id !== member.guild.id) // Exclude @everyone role
+                            .map(role => role.id);
 
-                            await UserIds.create({
-                                guildId,
-                                userId,
-                                roleIds
-                            });
-                            state.userIdsArray[guildId] = state.userIdsArray[guildId] || [];
-                            state.userIdsArray[guildId].push({
-                                userId,
-                                roleIds
-                            });
-                        }
+                        await UserIds.create({
+                            guildId,
+                            userId,
+                            roleIds
+                        });
+
+
+                        state.userIdsArray[guildId] = state.userIdsArray[guildId] || [];
+                        state.userIdsArray[guildId].push({
+                            userId,
+                            roleIds
+                        });
 
                         return interaction.reply({
                             embeds: [
                                 new EmbedBuilder()
-                                .setDescription(`User ${user.username} has been successfully added to the "bonk" list.`)
+                                .setDescription(`User ${user.username} has been successfully added to the "bonk" list for this server.`)
                                 .setColor('Purple')
                             ],
                             flags: MessageFlags.Ephemeral,
@@ -702,25 +727,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 } else if (action === 'remove') {
                     try {
                         const result = await UserIds.deleteOne({
+                            guildId,
                             userId
                         });
                         if (result.deletedCount === 0) {
                             return interaction.reply({
                                 embeds: [
                                     new EmbedBuilder()
-                                    .setDescription(`User ${user.username} was not found in the "bonk" list.`)
+                                    .setDescription(`User ${user.username} was not found in the "bonk" list for this server.`)
                                     .setColor('Purple')
                                 ],
                                 flags: MessageFlags.Ephemeral,
                             });
                         }
 
-                        state.userIdsArray[guildId] = state.userIdsArray[guildId].filter(entry => entry.userId !== userId);
+                        if (state.userIdsArray[guildId]) {
+                            state.userIdsArray[guildId] = state.userIdsArray[guildId].filter(entry => entry.userId !== userId);
+                        }
 
                         return interaction.reply({
                             embeds: [
                                 new EmbedBuilder()
-                                .setDescription(`User ${user.username} has been successfully removed from the "bonk" list.`)
+                                .setDescription(`User ${user.username} has been successfully removed from the "bonk" list for this server.`)
                                 .setColor('Purple')
                             ],
                             flags: MessageFlags.Ephemeral,
