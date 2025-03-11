@@ -228,8 +228,11 @@ client.once(Events.ClientReady, async () => {
 
     /**
      * Periodically send bonk-related updates using cron jobs
+     * 
+     * Update: 
+     * (* * * * *) = 1s (testing)
+     * (*"/"10 * * * *) = 10 mins (public)
      */
-
     cron.schedule('* * * * *', async () => {
         if (state.buttonPressed) return; // Avoid redundant updates
 
