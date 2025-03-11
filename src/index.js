@@ -47,7 +47,7 @@ const uve = new WebhookClient({
 const state = {
     buttonPressed: false,
     uveUpdate: {},
-    userIdsArray: []
+    userIdsArray: {}
 };
 
 const commands = [
@@ -189,8 +189,8 @@ client.once(Events.ClientReady, async () => {
      * Update bot's presence based on total bonk users across all guilds
      */
     const updateActivity = async () => {
-        const totalUsers = Object.values(state.userIdsArray)
-            .reduce((sum, users) => sum + users.length, 0);
+        const totalUsers = Object.keys(state.userIdsArray)
+            .reduce((sum, guildId) => sum + (state.userIdsArray[guildId] ?.length || 0), 0);
         const status = totalUsers === 0 ?
             'No bonk users' :
             `${totalUsers} bonk users across servers`;
@@ -198,21 +198,27 @@ client.once(Events.ClientReady, async () => {
         client.user.setPresence({
             activities: [{
                 name: status,
-                type: ActivityType.Watching
+                type: ActivityType.Watching,
             }],
             status: 'dnd',
         });
-    };
+    }
 
     /**
      * Fetch bonk users for a specific guild
      */
     const fetchBonkUsers = async (guild) => {
-        const userIds = await UserIds.find({
-            guildId: guild.id
-        }, 'userId');
-        state.userIdsArray[guild.id] = userIds.map(user => user.userId);
+        try {
+            const userIds = await UserIds.find({
+                guildId: guild.id
+            }, 'userId');
+            state.userIdsArray[guild.id] = userIds.map(user => user.userId);
+        } catch (error) {
+            console.error(`Error fetching bonk users for guild ${guild.id}:`, error);
+            state.userIdsArray[guild.id] = []; // Fallback to empty if the fetch fails
+        }
     };
+
     /**
      * Initialize bonk data for all guilds and update activity
      */
@@ -224,26 +230,27 @@ client.once(Events.ClientReady, async () => {
      * Periodically send bonk-related updates using cron jobs
      */
 
-    cron.schedule('*/10 * * * *', async () => {
+    cron.schedule('* * * * *', async () => {
         if (state.buttonPressed) return; // Avoid redundant updates
 
         await Promise.all(client.guilds.cache.map(async (guild) => {
             const channelData = await Channels.findOne({
                 guildId: guild.id
             });
-            const uveChannelId = channelData ? .channelId;
+            const uveChannelId = channelData ?.channelId;
             if (!uveChannelId) return;
 
             const uveChannel = client.channels.cache.get(uveChannelId);
             if (!uveChannel) return;
 
-            const members = await Promise.all(
-                (state.userIdsArray[guild.id] || []).map(userId =>
-                    guild.members.fetch(userId).catch(() => null)
-                )
+            const Members = await Promise.all(
+                (state.userIdsArray[guild.id] || []).map(async (userId) => {
+                    const member = await guild.members.fetch(userId).catch(() => null);
+                    return member ? member : null; // Only return valid members
+                })
             );
 
-            members.forEach(async (member, index) => {
+            Members.forEach(async (member, index) => {
                 if (!member) return;
 
                 const userId = state.userIdsArray[guild.id][index];
@@ -251,7 +258,7 @@ client.once(Events.ClientReady, async () => {
 
                 const row = new ActionRowBuilder().addComponents(
                     new ButtonBuilder()
-                    .setCustomId(`bonk_button_${guild.id}_${userId}`) // Use member ID dynamically
+                    .setCustomId(`bonk_button_${guild.id}_${userId}`) // Guild-specific custom ID
                     .setLabel(`Bonk ${username}`)
                     .setStyle(ButtonStyle.Danger)
                 );
@@ -267,6 +274,7 @@ client.once(Events.ClientReady, async () => {
 
                 const message = state.uveUpdate[userId];
                 if (message) {
+                    await message.fetch();
                     await message.edit({
                         embeds: [embed],
                         components: [row]
@@ -274,7 +282,7 @@ client.once(Events.ClientReady, async () => {
                 } else {
                     state.uveUpdate[userId] = await uveChannel.send({
                         embeds: [embed],
-                        components: [row]
+                        components: [row],
                     });
                 }
             });
@@ -283,30 +291,33 @@ client.once(Events.ClientReady, async () => {
 });
 
 client.on(Events.GuildMemberAdd, async (member) => {
-    const userId = member.id;
+    const {
+        id: userId,
+        guild: {
+            id: guildId,
+            roles: guildRoles
+        }
+    } = member;
 
     try {
         const user = await UserIds.findOne({
+            guildId,
             userId
         });
+        if (!user) return;
 
-        if (user && user.roleIds) {
-            const roleIds = user.roleIds;
+        for (const roleId of user.roleIds) {
+            const role = guildRoles.cache.get(roleId) || await guildRoles.fetch(roleId).catch(() => null);
+            if (!role || member.roles.cache.has(roleId)) continue;
 
-            await Promise.all(
-                roleIds.map(async (roleId) => {
-                    const role = member.guild.roles.cache.get(roleId);
-                    if (role) {
-                        await member.roles.add(role);
-                    }
-                })
-            );
+            try {
+                await member.roles.add(role);
+            } catch (error) {
+                console.error(`Failed to assign role ${roleId} to user ${userId}:`, error);
+            }
         }
-
-        if (state.userIdsArray.includes(member.id)) return;
-
     } catch (error) {
-        console.error('Error assigning roles on member add:', error);
+        console.error(`Error while processing user ${userId} in guild ${guildId}:`, error);
     }
 });
 
@@ -340,12 +351,6 @@ client.on(Events.GuildMemberRemove, async (member) => {
                 upsert: true,
                 new: true
             });
-
-            /**
-             * Prevent spamming the webhook when people
-             * are getting kicked from the bonk list
-             */
-            if (state.userIdsArray.includes(member.id)) return;
         }
     } catch (error) {
         console.error('Error updating kick count or sending invite:', error);
@@ -399,7 +404,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                             guildId
                         });
 
-                        if (!existingChannel ? .channelId) {
+                        if (!existingChannel ?.channelId) {
                             return interaction.reply({
                                 content: 'There is no bonk channel set to remove.',
                                 flags: MessageFlags.Ephemeral,
@@ -422,12 +427,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     });
                 } catch (error) {
                     console.error(`Error in bonkchannel command: ${error.message}`);
-                    return interaction.reply({
+                    await interaction.reply({
                         content: 'An error occurred while processing your request. Please try again later.',
                         flags: MessageFlags.Ephemeral,
                     });
                 }
             }
+            break;
             case 'kickleaderboard':
             case 'clickleaderboard': {
                 const isKick = cmd === 'kickleaderboard';
@@ -487,6 +493,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     ],
                 });
             }
+            break;
             case 'gkick':
             case 'gban': {
                 const users = options.getString("users");
@@ -639,6 +646,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     });
                 }
             }
+            break;
             case "bonk": {
                 const action = options.getString('action');
                 const user = options.getUser('user');
@@ -697,7 +705,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
                             userId,
                             roleIds
                         });
-
 
                         state.userIdsArray[guildId] = state.userIdsArray[guildId] || [];
                         state.userIdsArray[guildId].push({
@@ -768,6 +775,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
             }
         }
     } else if (interaction.isButton()) {
+        /**
+         * Button format: ButtonId_GuildId_UserId
+         */
         const [, , guildId, targetUserId] = interaction.customId.split('_');
         const {
             id: userId,
