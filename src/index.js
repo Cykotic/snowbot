@@ -185,62 +185,39 @@ const rest = new REST({
 })();
 
 client.once(Events.ClientReady, async () => {
-    /**
-     * Update bot's presence based on total bonk users across all guilds
-     */
     const updateActivity = async () => {
         const totalUsers = Object.keys(state.userIdsArray)
-            .reduce((sum, guildId) => sum + (state.userIdsArray[guildId] ?.length || 0), 0);
-        const status = totalUsers === 0 ?
-            'No bonk users' :
-            `${totalUsers} bonk users across servers`;
+            .reduce((sum, guildId) => sum + (state.userIdsArray[guildId]?.length || 0), 0);
+        const status = totalUsers === 0
+            ? 'No bonk users'
+            : `${totalUsers} bonk users across servers`;
 
         client.user.setPresence({
-            activities: [{
-                name: status,
-                type: ActivityType.Watching,
-            }],
+            activities: [{ name: status, type: ActivityType.Watching }],
             status: 'dnd',
         });
-    }
+    };
 
-    /**
-     * Fetch bonk users for a specific guild
-     */
     const fetchBonkUsers = async (guild) => {
         try {
-            const userIds = await UserIds.find({
-                guildId: guild.id
-            }, 'userId');
+            const userIds = await UserIds.find({ guildId: guild.id }, 'userId');
             state.userIdsArray[guild.id] = userIds.map(user => user.userId);
         } catch (error) {
             console.error(`Error fetching bonk users for guild ${guild.id}:`, error);
-            state.userIdsArray[guild.id] = []; // Fallback to empty if the fetch fails
+            state.userIdsArray[guild.id] = []; // Fallback to empty array
         }
     };
 
-    /**
-     * Initialize bonk data for all guilds and update activity
-     */
     await Promise.all(client.guilds.cache.map(fetchBonkUsers));
     await updateActivity();
     setInterval(updateActivity, 10000);
 
-    /**
-     * Periodically send bonk-related updates using cron jobs
-     * 
-     * Update: 
-     * (* * * * *) = 1s (testing)
-     * (*"/"10 * * * *) = 10 mins (public)
-     */
     cron.schedule('* * * * *', async () => {
-        if (state.buttonPressed) return; // Avoid redundant updates
+        if (state.buttonPressed) return;
 
         await Promise.all(client.guilds.cache.map(async (guild) => {
-            const channelData = await Channels.findOne({
-                guildId: guild.id
-            });
-            const uveChannelId = channelData ?.channelId;
+            const channelData = await Channels.findOne({ guildId: guild.id });
+            const uveChannelId = channelData?.channelId;
             if (!uveChannelId) return;
 
             const uveChannel = client.channels.cache.get(uveChannelId);
@@ -248,31 +225,30 @@ client.once(Events.ClientReady, async () => {
 
             const Members = await Promise.all(
                 (state.userIdsArray[guild.id] || []).map(async (userId) => {
-                    const member = await guild.members.fetch(userId).catch(() => null);
-                    return member ? member : null; // Only return valid members
+                    const cachedMember = guild.members.cache.get(userId);
+                    const member = cachedMember || await guild.members.fetch(userId).catch(() => null);
+                    return member || null;
                 })
             );
 
             Members.forEach(async (member, index) => {
-                if (!member) return;
+                if (!member || !member.user) return;
 
                 const userId = state.userIdsArray[guild.id][index];
                 const username = member.user.username;
 
                 const row = new ActionRowBuilder().addComponents(
                     new ButtonBuilder()
-                    .setCustomId(`bonk_button_${guild.id}_${userId}`) // Guild-specific custom ID
-                    .setLabel(`Bonk ${username}`)
-                    .setStyle(ButtonStyle.Danger)
+                        .setCustomId(`bonk_button_${guild.id}_${userId}`)
+                        .setLabel(`Bonk ${username}`)
+                        .setStyle(ButtonStyle.Danger)
                 );
 
                 const embed = new EmbedBuilder()
                     .setTitle('Bonk User')
                     .setDescription(`Press the button to bonk **${username}** in **${guild.name}**.`)
                     .setColor('Purple')
-                    .setFooter({
-                        text: `User ID: ${userId}`
-                    })
+                    .setFooter({ text: `User ID: ${userId}` })
                     .setTimestamp();
 
                 const message = state.uveUpdate[userId];
@@ -280,7 +256,7 @@ client.once(Events.ClientReady, async () => {
                     await message.fetch();
                     await message.edit({
                         embeds: [embed],
-                        components: [row]
+                        components: [row],
                     });
                 } else {
                     state.uveUpdate[userId] = await uveChannel.send({
@@ -292,6 +268,7 @@ client.once(Events.ClientReady, async () => {
         }));
     });
 });
+
 
 client.on(Events.GuildMemberAdd, async (member) => {
     const {
@@ -814,10 +791,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await uve.send({
             embeds: [
                 new EmbedBuilder()
-                .setDescription(`Button clicked by user: ${username} (ID: ${userId}) in guild ${interaction.guild.name}`)
+                .setDescription(`Button clicked by user: ${username} (ID: ${userId})`)
                 .setColor('Purple'),
             ],
-        });
+        })
 
         /**
          * Check if the target user is in the guild
