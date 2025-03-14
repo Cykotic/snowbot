@@ -791,7 +791,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await uve.send({
             embeds: [
                 new EmbedBuilder()
-                .setDescription(`Button clicked by user: ${username} (ID: ${userId})`)
+                .setDescription(`Button clicked by user: ${username} (ID: ${userId}) in guild ${interaction.guild.name}`)
                 .setColor('Purple'),
             ],
         })
